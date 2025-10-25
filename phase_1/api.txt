@@ -1,0 +1,1 @@
+export OPENAI_API_KEY='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'

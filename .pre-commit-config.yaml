@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: neurashield-scan
+        name: NeuraShield AI Security Scan
+        entry: python .githooks/pre_commit_scan.py
+        language: system
+        pass_filenames: true
+        files: \.py$
+        stages: [pre-commit]
