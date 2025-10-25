@@ -51,8 +51,8 @@ def check_file(file_path):
             if 'if ' not in line and 'SELECT' not in line.upper():
                 issues.append((i, 'HIGH', 'SQL Injection'))
         
-        # Check 3: Code Injection
-        if ('eval(' in line or 'exec(') in line:
+        # Check 3: Code Injection - FIXED
+        if ('eval(' in line or 'exec(' in line):
             if 'if ' not in line and 'in line' not in line:
                 issues.append((i, 'HIGH', 'Code Injection'))
     
