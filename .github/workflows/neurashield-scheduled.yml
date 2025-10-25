@@ -1,0 +1,65 @@
+name: NeuraShield Scheduled Full Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Every day at 2 AM UTC
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  full-repository-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run Full Repository Analysis
+        run: |
+          python phase_2/auto_analyze_repo.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Generate Security Dashboard
+        run: |
+          python .github/scripts/generate_dashboard.py
+      
+      - name: Upload Analysis Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-scan-${{ github.run_number }}
+          path: |
+            phase_2/repo_analysis_results.json
+            phase_2/repo_analysis_report.txt
+            security_dashboard.html
+      
+      - name: Create Issue for Critical Findings
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('phase_2/repo_analysis_results.json', 'utf8'));
+            
+            const criticalIssues = results.filter(r => 
+              r.bug_analysis?.overall_risk === 'critical'
+            );
+            
+            if (criticalIssues.length > 0) {
+              github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔴 Security Scan: ${criticalIssues.length} Critical Vulnerabilities Detected`,
+                body: `Critical vulnerabilities found. See workflow artifacts for details.`,
+                labels: ['security', 'critical', 'automated-scan']
+              });
+            }

@@ -1,0 +1,84 @@
+name: NeuraShield PR Security Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.py'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run Phase 1 Pipeline
+        run: |
+          if [ ! -d "phase_1/chroma_db" ]; then
+            echo "ChromaDB not found. Running Phase 1 pipeline..."
+            python phase1_pipeline.py
+          else
+            echo "Using existing ChromaDB"
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Get changed Python files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            **.py
+      
+      - name: Run NeuraShield Analysis
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Post PR Comment
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('pr_analysis_report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+      
+      - name: Check for Critical Issues
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          python .github/scripts/check_critical.py pr_analysis_results.json
+      
+      - name: Upload Analysis Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurashield-pr-analysis
+          path: |
+            pr_analysis_results.json
+            pr_analysis_report.md

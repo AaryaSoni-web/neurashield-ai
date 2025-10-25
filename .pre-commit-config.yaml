@@ -7,4 +7,5 @@ repos:
         language: system
         pass_filenames: true
         files: \.py$
-        stages: [pre-commit]
+        stages: [commit]
+        description: Run NeuraShield AI Security Scan on Python files before commit.
