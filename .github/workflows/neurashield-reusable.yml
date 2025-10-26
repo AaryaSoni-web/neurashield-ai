@@ -13,12 +13,12 @@ on:
         type: string
         default: '3.11'
       analysis_type:
-        description: 'Type of analysis to run (all, security, bugs, optimization)'
+        description: 'Type of analysis to run'
         required: false
         type: string
         default: 'all'
       fail_on_critical:
-        description: 'Whether to fail the workflow on critical issues'
+        description: 'Whether to fail on critical issues'
         required: false
         type: boolean
         default: true
@@ -26,17 +26,14 @@ on:
 jobs:
   neurashield-scan:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
+    # DO NOT define permissions here - let caller define them
     
     steps:
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       
       - name: Checkout NeuraShield AI engine
         uses: actions/checkout@v4
@@ -83,7 +80,7 @@ jobs:
       - name: Display changed files
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          echo "🔍 Changed Python files detected:"
+          echo "🔍 Changed Python files:"
           echo "${{ steps.changed-files.outputs.all_changed_files }}"
       
       - name: Run NeuraShield AI analysis
@@ -93,12 +90,16 @@ jobs:
           export PYTHONPATH=${{ github.workspace }}/neurashield-engine:$PYTHONPATH
           cd neurashield-engine
           
-          echo "🛡️ Running NeuraShield AI analysis on changed files..."
+          echo "🛡️ Running NeuraShield AI analysis..."
           python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
           
-          # Move results to workspace root for easier access
-          mv pr_analysis_results.json ${{ github.workspace }}/
-          mv pr_analysis_report.md ${{ github.workspace }}/
+          # Move results to workspace root
+          if [ -f "pr_analysis_results.json" ]; then
+            mv pr_analysis_results.json ${{ github.workspace }}/
+          fi
+          if [ -f "pr_analysis_report.md" ]; then
+            mv pr_analysis_report.md ${{ github.workspace }}/
+          fi
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         continue-on-error: true
@@ -125,31 +126,30 @@ jobs:
                   body: report
                 });
                 
-                console.log('✅ Successfully posted analysis report to PR');
+                console.log('✅ Successfully posted analysis report');
               } else {
-                console.log('⚠️ Report file not found at:', reportPath);
+                console.log('⚠️ Report file not found');
                 
-                // Post a fallback comment
                 await github.rest.issues.createComment({
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: '⚠️ NeuraShield AI analysis completed, but report generation failed. Check workflow logs for details.'
+                  body: '⚠️ NeuraShield AI analysis completed. Check workflow logs for details.'
                 });
               }
             } catch (error) {
-              console.error('❌ Error posting comment:', error.message);
+              console.error('Error posting comment:', error.message);
               throw error;
             }
       
-      - name: Check for critical security issues
+      - name: Check for critical issues
         if: steps.changed-files.outputs.any_changed == 'true' && inputs.fail_on_critical
         run: |
           if [ -f "${{ github.workspace }}/pr_analysis_results.json" ]; then
             cd neurashield-engine
             python .github/scripts/check_critical.py ${{ github.workspace }}/pr_analysis_results.json
           else
-            echo "⚠️ No results file found, skipping critical check"
+            echo "⚠️ No results file, skipping critical check"
           fi
       
       - name: Upload analysis artifacts
@@ -161,14 +161,3 @@ jobs:
             pr_analysis_results.json
             pr_analysis_report.md
           retention-days: 30
-      
-      - name: Analysis summary
-        if: always()
-        run: |
-          echo "## 🛡️ NeuraShield AI Analysis Summary" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -f "${{ github.workspace }}/pr_analysis_report.md" ]; then
-            cat ${{ github.workspace }}/pr_analysis_report.md >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ No analysis report generated" >> $GITHUB_STEP_SUMMARY
-          fi
