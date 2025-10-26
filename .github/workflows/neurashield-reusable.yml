@@ -4,12 +4,24 @@ on:
   workflow_call:
     secrets:
       OPENAI_API_KEY:
+        description: 'OpenAI API key for NeuraShield analysis'
         required: true
     inputs:
       python_version:
+        description: 'Python version to use'
         required: false
         type: string
         default: '3.11'
+      analysis_type:
+        description: 'Type of analysis to run (all, security, bugs, optimization)'
+        required: false
+        type: string
+        default: 'all'
+      fail_on_critical:
+        description: 'Whether to fail the workflow on critical issues'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   neurashield-scan:
@@ -17,93 +29,146 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-
+      issues: write
+    
     steps:
-      - name: Checkout target repo
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Checkout NeuraShield
+          ref: ${{ github.event.pull_request.head.sha }}
+      
+      - name: Checkout NeuraShield AI engine
         uses: actions/checkout@v4
         with:
           repository: AaryaSoni-web/neurashield-ai
           path: neurashield-engine
           ref: main
-
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version }}
-
-      - name: Install NeuraShield
+          cache: 'pip'
+      
+      - name: Install NeuraShield dependencies
         run: |
           pip install --upgrade pip
           pip install -r neurashield-engine/requirements.txt
-
-      - name: Run Phase 1 Pipeline
+      
+      - name: Initialize ChromaDB vector store
         run: |
           if [ ! -d "neurashield-engine/phase_1/chroma_db" ]; then
-            echo "ChromaDB not found. Running Phase 1 pipeline..."
+            echo "📦 ChromaDB not found. Initializing vector store..."
             cd neurashield-engine
             python phase1_pipeline.py
             cd ..
           else
-            echo "Using existing ChromaDB"
+            echo "✅ Using existing ChromaDB"
           fi
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
+      
       - name: Get changed Python files
         id: changed-files
         uses: tj-actions/changed-files@v42
         with:
           files: |
-            **.py
+            **/*.py
             !.github/**
             !.githooks/**
-
-      - name: Run NeuraShield Analysis
+            !**/test_*.py
+            !**/tests/**
+      
+      - name: Display changed files
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
+          echo "🔍 Changed Python files detected:"
+          echo "${{ steps.changed-files.outputs.all_changed_files }}"
+      
+      - name: Run NeuraShield AI analysis
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: analysis
+        run: |
           export PYTHONPATH=${{ github.workspace }}/neurashield-engine:$PYTHONPATH
+          cd neurashield-engine
           
-          # Convert relative file paths to absolute paths
-          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
-          FULL_PATHS=""
-          for file in $FILES; do
-            FULL_PATHS="$FULL_PATHS ${{ github.workspace }}/$file"
-          done
+          echo "🛡️ Running NeuraShield AI analysis on changed files..."
+          python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
           
-          # Run analysis from root directory
-          python neurashield-engine/.github/scripts/pr_analyzer.py $FULL_PATHS
+          # Move results to workspace root for easier access
+          mv pr_analysis_results.json ${{ github.workspace }}/
+          mv pr_analysis_report.md ${{ github.workspace }}/
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-      - name: Post PR Comment
+        continue-on-error: true
+      
+      - name: Post analysis report as PR comment
         if: steps.changed-files.outputs.any_changed == 'true' && always()
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            const path = require('path');
+            
             try {
-              const report = fs.readFileSync('pr_analysis_report.md', 'utf8');
+              const reportPath = path.join(process.env.GITHUB_WORKSPACE, 'pr_analysis_report.md');
               
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: report
-              });
+              if (fs.existsSync(reportPath)) {
+                const report = fs.readFileSync(reportPath, 'utf8');
+                
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: report
+                });
+                
+                console.log('✅ Successfully posted analysis report to PR');
+              } else {
+                console.log('⚠️ Report file not found at:', reportPath);
+                
+                // Post a fallback comment
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: '⚠️ NeuraShield AI analysis completed, but report generation failed. Check workflow logs for details.'
+                });
+              }
             } catch (error) {
-              console.log('Report file not found or error posting comment:', error);
+              console.error('❌ Error posting comment:', error.message);
+              throw error;
             }
-
-      - name: Check for Critical Issues
-        if: steps.changed-files.outputs.any_changed == 'true'
+      
+      - name: Check for critical security issues
+        if: steps.changed-files.outputs.any_changed == 'true' && inputs.fail_on_critical
         run: |
-          if [ -f "pr_analysis_results.json" ]; then
-            python neurashield-engine/.github/scripts/check_critical.py pr_analysis_results.json
+          if [ -f "${{ github.workspace }}/pr_analysis_results.json" ]; then
+            cd neurashield-engine
+            python .github/scripts/check_critical.py ${{ github.workspace }}/pr_analysis_results.json
           else
-            echo "No results file found, skipping critical check"
+            echo "⚠️ No results file found, skipping critical check"
+          fi
+      
+      - name: Upload analysis artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurashield-analysis-results
+          path: |
+            pr_analysis_results.json
+            pr_analysis_report.md
+          retention-days: 30
+      
+      - name: Analysis summary
+        if: always()
+        run: |
+          echo "## 🛡️ NeuraShield AI Analysis Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "${{ github.workspace }}/pr_analysis_report.md" ]; then
+            cat ${{ github.workspace }}/pr_analysis_report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No analysis report generated" >> $GITHUB_STEP_SUMMARY
           fi
