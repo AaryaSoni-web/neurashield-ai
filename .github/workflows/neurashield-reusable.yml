@@ -67,8 +67,16 @@ jobs:
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           export PYTHONPATH=${{ github.workspace }}/neurashield-engine:$PYTHONPATH
-          cd neurashield-engine
-          python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
+          
+          # Convert relative file paths to absolute paths
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          FULL_PATHS=""
+          for file in $FILES; do
+            FULL_PATHS="$FULL_PATHS ${{ github.workspace }}/$file"
+          done
+          
+          # Run analysis from root directory
+          python neurashield-engine/.github/scripts/pr_analyzer.py $FULL_PATHS
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
@@ -79,7 +87,7 @@ jobs:
           script: |
             const fs = require('fs');
             try {
-              const report = fs.readFileSync('neurashield-engine/pr_analysis_report.md', 'utf8');
+              const report = fs.readFileSync('pr_analysis_report.md', 'utf8');
               
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -94,9 +102,8 @@ jobs:
       - name: Check for Critical Issues
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          if [ -f "neurashield-engine/pr_analysis_results.json" ]; then
-            cd neurashield-engine
-            python .github/scripts/check_critical.py pr_analysis_results.json
+          if [ -f "pr_analysis_results.json" ]; then
+            python neurashield-engine/.github/scripts/check_critical.py pr_analysis_results.json
           else
             echo "No results file found, skipping critical check"
           fi
