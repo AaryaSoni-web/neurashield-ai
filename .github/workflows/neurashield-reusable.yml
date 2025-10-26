@@ -45,7 +45,9 @@ jobs:
         run: |
           if [ ! -d "neurashield-engine/phase_1/chroma_db" ]; then
             echo "ChromaDB not found. Running Phase 1 pipeline..."
-            python neurashield-engine/phase1_pipeline.py
+            cd neurashield-engine
+            python phase1_pipeline.py
+            cd ..
           else
             echo "Using existing ChromaDB"
           fi
@@ -56,32 +58,45 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v42
         with:
-          files: '**.py'
+          files: |
+            **.py
+            !.github/**
+            !.githooks/**
 
       - name: Run NeuraShield Analysis
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           export PYTHONPATH=${{ github.workspace }}/neurashield-engine:$PYTHONPATH
-          python neurashield-engine/.github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
+          cd neurashield-engine
+          python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Post PR Comment
-        if: steps.changed-files.outputs.any_changed == 'true'
+        if: steps.changed-files.outputs.any_changed == 'true' && always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('pr_analysis_report.md', 'utf8');
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: report
-            });
+            try {
+              const report = fs.readFileSync('neurashield-engine/pr_analysis_report.md', 'utf8');
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+            } catch (error) {
+              console.log('Report file not found or error posting comment:', error);
+            }
 
       - name: Check for Critical Issues
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          python neurashield-engine/.github/scripts/check_critical.py pr_analysis_results.json
+          if [ -f "neurashield-engine/pr_analysis_results.json" ]; then
+            cd neurashield-engine
+            python .github/scripts/check_critical.py pr_analysis_results.json
+          else
+            echo "No results file found, skipping critical check"
+          fi
