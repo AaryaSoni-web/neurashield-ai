@@ -25,10 +25,8 @@ jobs:
     name: Analyze Code
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
+    # REMOVED permissions block - this is the fix!
+    # Permissions are inherited from the calling workflow
     
     steps:
       - name: Checkout NeuraShield AI
