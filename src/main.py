@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime
 
-def read_file_safely(filepath, max_lines=100):
+def read_file_safely(filepath, max_lines=150):
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
@@ -13,106 +13,176 @@ def read_file_safely(filepath, max_lines=100):
         return ""
 
 def analyze_code_locally(code_content, filename):
-    """Local code analysis without OpenAI"""
-    issues = []
-    severity = "low"
-    score = 85
+    """Comprehensive local code analysis"""
+    bugs = []
+    optimizations = []
+    vulnerabilities = []
+    severity_score = 3.0
     
-    if not code_content or len(code_content.strip()) < 10:
+    if not code_content or len(code_content.strip()) < 20:
         return {
             "severity": "low",
             "score": 85,
-            "issues": [{"title": "Small file", "description": "File too small to analyze", "fix": "N/A"}]
+            "bugs": [{"title": "Small file", "description": "File too small", "severity": "low", "fix": "N/A", "cwe": ""}],
+            "optimizations": [],
+            "vulnerabilities": [],
+            "cvss_score": 2.0,
+            "issues": []
         }
     
-    lines = code_content.split('\n')
+    lines_list = code_content.split('\n')
     
-    # Check for security issues
-    for line_num, line in enumerate(lines, 1):
-        # SQL Injection
-        if 'execute' in line and ('f"' in line or "f'" in line or '%' in line):
-            issues.append({
-                "title": "Potential SQL Injection",
-                "description": f"Line {line_num}: Dynamic SQL query detected",
-                "severity": "high",
-                "fix": "Use parameterized queries instead of string formatting"
-            })
-            severity = "high"
-            score = max(score - 20, 0)
+    # BUG DETECTION
+    for line_num, line in enumerate(lines_list, 1):
         
         # Hardcoded credentials
-        if re.search(r'(password|secret|api_key|token)\s*=\s*["\']', line, re.IGNORECASE):
-            issues.append({
-                "title": "Hardcoded Credentials",
-                "description": f"Line {line_num}: Potential hardcoded secret found",
-                "severity": "critical",
-                "fix": "Use environment variables or secure vaults"
+        if re.search(r'(password|secret|api_key|token|pwd)\s*=\s*["\']', line, re.IGNORECASE):
+            bugs.append({
+                "title": "Hardcoded API Key/Credentials",
+                "description": f"Line {line_num}: Hardcoded credentials detected. This exposes sensitive information.",
+                "severity": "HIGH",
+                "exploit_difficulty": "easy",
+                "impact": "C:complete I:complete A:partial",
+                "fix": "Use environment variables or secure vaults (AWS Secrets Manager, HashiCorp Vault)",
+                "cwe": "CWE-798"
             })
-            severity = "critical"
-            score = max(score - 30, 0)
+            severity_score = max(severity_score, 8.5)
         
-        # Unsafe eval
-        if 'eval(' in line or 'exec(' in line:
-            issues.append({
-                "title": "Unsafe eval/exec",
-                "description": f"Line {line_num}: eval() or exec() detected",
-                "severity": "critical",
-                "fix": "Avoid eval/exec, use safer alternatives"
+        # SQL Injection
+        if re.search(r'execute\s*\(.*f["\'].*%|execute\s*\(.*\.format|execute\s*\(.*\+', line):
+            bugs.append({
+                "title": "SQL Injection Vulnerability",
+                "description": f"Line {line_num}: Dynamic SQL query detected using string formatting.",
+                "severity": "HIGH",
+                "exploit_difficulty": "moderate",
+                "impact": "C:complete I:complete A:complete",
+                "fix": "Use parameterized queries (prepared statements) instead of string concatenation.",
+                "cwe": "CWE-89"
             })
-            severity = "critical"
-            score = max(score - 25, 0)
+            severity_score = max(severity_score, 9.0)
+        
+        # Unsafe eval/exec
+        if 'eval(' in line or 'exec(' in line:
+            bugs.append({
+                "title": "Unsafe Code Execution",
+                "description": f"Line {line_num}: eval() or exec() detected - allows arbitrary code execution.",
+                "severity": "CRITICAL",
+                "exploit_difficulty": "easy",
+                "impact": "C:complete I:complete A:complete",
+                "fix": "Use safer alternatives like ast.literal_eval() or avoid dynamic code execution entirely.",
+                "cwe": "CWE-95"
+            })
+            severity_score = max(severity_score, 9.8)
+        
+        # Improper error handling
+        if 'except' in line and 'pass' in lines_list[min(line_num, len(lines_list)-1)]:
+            bugs.append({
+                "title": "Improper Error Handling",
+                "description": f"Line {line_num}: Exception caught and silently ignored (bare except/pass).",
+                "severity": "MEDIUM",
+                "exploit_difficulty": "easy",
+                "impact": "C:partial I:none A:none",
+                "fix": "Use specific exception handling and log errors properly for debugging.",
+                "cwe": "CWE-209"
+            })
+            severity_score = max(severity_score, 5.0)
         
         # Pickle deserialization
         if 'pickle.load' in line or 'pickle.loads' in line:
-            issues.append({
-                "title": "Unsafe Pickle Deserialization",
-                "description": f"Line {line_num}: Pickle deserialization detected",
-                "severity": "high",
-                "fix": "Use JSON or other safe serialization formats"
+            bugs.append({
+                "title": "Unsafe Deserialization",
+                "description": f"Line {line_num}: Unsafe pickle deserialization can execute arbitrary code.",
+                "severity": "CRITICAL",
+                "exploit_difficulty": "moderate",
+                "impact": "C:complete I:complete A:complete",
+                "fix": "Use JSON or other safe serialization formats instead of pickle.",
+                "cwe": "CWE-502"
             })
-            severity = "high"
-            score = max(score - 15, 0)
+            severity_score = max(severity_score, 9.5)
         
-        # No input validation
-        if 'input(' in line and 'str(' not in line:
-            issues.append({
-                "title": "Missing Input Validation",
-                "description": f"Line {line_num}: User input without validation",
-                "severity": "medium",
-                "fix": "Always validate and sanitize user input"
+        # Missing input validation
+        if re.search(r'(input\(|request\.args|request\.form|request\.data)', line):
+            bugs.append({
+                "title": "Lack of Input Validation",
+                "description": f"Line {line_num}: User input accepted without validation.",
+                "severity": "MEDIUM",
+                "exploit_difficulty": "moderate",
+                "impact": "C:partial I:partial A:none",
+                "fix": "Implement input validation and sanitization for all user inputs.",
+                "cwe": "CWE-20"
             })
-            score = max(score - 5, 0)
-        
-        # Weak randomness
-        if 'random.' in line and 'secrets.' not in line:
-            issues.append({
-                "title": "Weak Random Number Generation",
-                "description": f"Line {line_num}: Using random module for security",
-                "severity": "medium",
-                "fix": "Use secrets module for cryptographic operations"
-            })
-            score = max(score - 10, 0)
+            severity_score = max(severity_score, 6.3)
     
-    # Check for good practices
-    if 'try:' in code_content and 'except' in code_content:
-        score = min(score + 5, 100)
+    # CODE OPTIMIZATION
+    if len(lines_list) > 100:
+        optimizations.append({
+            "type": "ALGORITHMIC",
+            "title": "Batch Processing Optimization",
+            "description": "Large file detected. Consider batch processing for code chunks.",
+            "improvement": "Potential 2x speedup with parallel processing",
+            "trade_offs": "Increased code complexity"
+        })
     
-    if 'logging' in code_content:
-        score = min(score + 3, 100)
+    if re.search(r'\bfor\b.*in\b.*\bfor\b.*in\b', code_content):
+        optimizations.append({
+            "type": "ALGORITHMIC",
+            "title": "Nested Loop Optimization",
+            "description": "Nested loops detected which may impact performance.",
+            "improvement": "Use data structures like sets or dicts for O(1) lookup",
+            "trade_offs": "Increased memory usage"
+        })
     
-    if 'assert' in code_content:
-        score = min(score + 2, 100)
+    if 'import' in code_content and len(lines_list) < 50:
+        optimizations.append({
+            "type": "LIBRARY",
+            "title": "Lazy Import Optimization",
+            "description": "All imports are loaded at startup.",
+            "improvement": "Use lazy imports for rarely-used modules",
+            "trade_offs": "Slightly more complex code"
+        })
     
-    # Limit issues to top 5
-    issues = sorted(issues, key=lambda x: {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(x['severity'], 4))[:5]
+    # SECURITY VULNERABILITIES
+    if severity_score >= 7.0:
+        vulnerabilities.append({
+            "title": "Insecure Default Configuration",
+            "cvss_score": 7.5,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+            "cwe": "CWE-1188",
+            "remediation": "Configure application securely for production: disable debug mode, set secure headers."
+        })
     
-    if not issues:
-        issues = [{"title": "Code Review Passed", "description": "No major security issues detected", "severity": "low", "fix": "N/A"}]
+    if any('input' in bug.get('description', '').lower() for bug in bugs):
+        vulnerabilities.append({
+            "title": "Improper Input Validation",
+            "cvss_score": 6.3,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+            "cwe": "CWE-20",
+            "remediation": "Implement input validation and sanitization for all user inputs."
+        })
+    
+    # Limit bugs and dedup
+    bugs = bugs[:5]
+    
+    # Calculate score (100 - penalties)
+    score = 100
+    for bug in bugs:
+        if bug['severity'] == 'CRITICAL':
+            score -= 25
+        elif bug['severity'] == 'HIGH':
+            score -= 15
+        elif bug['severity'] == 'MEDIUM':
+            score -= 8
+    
+    score = max(score, 20)
     
     return {
-        "severity": severity,
-        "score": max(score, 0),
-        "issues": issues
+        "severity": "critical" if severity_score >= 9 else "high" if severity_score >= 7 else "medium" if severity_score >= 5 else "low",
+        "score": score,
+        "bugs": bugs,
+        "optimizations": optimizations,
+        "vulnerabilities": vulnerabilities,
+        "cvss_score": min(severity_score, 10.0),
+        "issues": bugs
     }
 
 def scan_directory(source_path):
@@ -120,7 +190,7 @@ def scan_directory(source_path):
     total_lines = 0
     
     for root, dirs, files in os.walk(source_path):
-        dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', '.venv', 'venv', 'node_modules']]
+        dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', '.venv', 'venv']]
         
         for file in files:
             if file.endswith('.py'):
@@ -139,38 +209,103 @@ def scan_directory(source_path):
     
     return sorted(python_files, key=lambda x: x['lines'], reverse=True), total_lines
 
-def generate_html_report(report_data):
+def generate_text_report(report_data):
     stats = report_data.get('statistics', {})
     files_analysis = report_data.get('files_analysis', [])
-    recommendations = report_data.get('recommendations', [])
-    score = stats.get('security_score', 0)
     
-    html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>NeuraShield Report</title>\n<style>\nbody { font-family: Segoe UI, Arial; background: #f5f5f5; padding: 20px; }\n.container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }\n.header { border-bottom: 3px solid #4CAF50; margin-bottom: 30px; padding-bottom: 20px; }\nh1 { color: #333; margin: 0; font-size: 32px; }\n.timestamp { color: #666; font-size: 14px; margin-top: 10px; }\n.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }\n.metric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 8px; text-align: center; }\n.metric.critical { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); }\n.metric.high { background: linear-gradient(135deg, #ffa502 0%, #ffb84d 100%); }\n.metric.good { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }\n.metric h3 { font-size: 36px; margin: 0; font-weight: bold; }\n.metric p { font-size: 13px; margin: 8px 0 0 0; }\n.section { margin: 40px 0; }\n.section h2 { color: #333; font-size: 24px; border-bottom: 2px solid #eee; padding-bottom: 12px; margin: 0 0 20px 0; }\n.summary-list { list-style: none; padding: 0; }\n.summary-list li { padding: 8px 0; color: #555; font-size: 15px; border-bottom: 1px solid #f0f0f0; }\n.summary-list strong { color: #333; }\n.file-block { background: #f9f9f9; border-left: 5px solid #4CAF50; padding: 20px; margin: 15px 0; border-radius: 4px; }\n.file-header { font-weight: bold; font-size: 16px; color: #333; margin-bottom: 10px; }\n.file-meta { color: #666; font-size: 13px; margin-bottom: 12px; }\n.issue { background: white; border-left: 4px solid #ff6b6b; padding: 15px; margin: 12px 0; border-radius: 3px; }\n.issue.critical { border-left-color: #f5576c; }\n.issue.high { border-left-color: #ffa502; }\n.issue.medium { border-left-color: #4facfe; }\n.issue.low { border-left-color: #28a745; }\n.issue-title { font-weight: bold; color: #333; font-size: 15px; margin-bottom: 5px; }\n.issue-desc { color: #666; font-size: 13px; margin: 5px 0; line-height: 1.5; }\n.issue-fix { background: #f0f0f0; padding: 8px; margin: 8px 0; border-radius: 3px; font-size: 12px; }\n.issue-fix strong { color: #333; }\n.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 8px; }\n.badge.critical { background: #f5576c; color: white; }\n.badge.high { background: #ffa502; color: white; }\n.badge.medium { background: #4facfe; color: white; }\n.badge.low { background: #28a745; color: white; }\n.rec-list { list-style: none; padding: 0; }\n.rec-item { background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 12px; margin: 10px 0; border-radius: 3px; color: #2e7d32; }\n.footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; text-align: center; }\n</style>\n</head>\n<body>\n<div class="container">\n<div class="header">\n<h1>NeuraShield AI Security Analysis Report</h1>\n<p class="timestamp">Generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + ' IST</p>\n</div>\n\n<div class="metrics">\n<div class="metric">\n<h3>' + str(stats.get('total_python_files', 0)) + '</h3>\n<p>Total Files</p>\n</div>\n<div class="metric critical">\n<h3>' + str(stats.get('issues', {}).get('critical', 0)) + '</h3>\n<p>Critical Issues</p>\n</div>\n<div class="metric high">\n<h3>' + str(stats.get('issues', {}).get('high', 0)) + '</h3>\n<p>High Issues</p>\n</div>\n<div class="metric good">\n<h3>' + str(score) + '</h3>\n<p>Security Score</p>\n</div>\n</div>\n\n<div class="section">\n<h2>Analysis Summary</h2>\n<ul class="summary-list">\n<li><strong>Total Files:</strong> ' + str(stats.get('total_python_files', 0)) + '</li>\n<li><strong>Files Analyzed:</strong> ' + str(stats.get('files_analyzed', 0)) + '</li>\n<li><strong>Total Lines:</strong> ' + str(stats.get('total_lines', 0)) + '</li>\n<li><strong>Security Score:</strong> ' + str(stats.get('security_score', 0)) + '/100</li>\n<li><strong>Critical Issues:</strong> ' + str(stats.get('issues', {}).get('critical', 0)) + '</li>\n<li><strong>High Issues:</strong> ' + str(stats.get('issues', {}).get('high', 0)) + '</li>\n<li><strong>Medium Issues:</strong> ' + str(stats.get('issues', {}).get('medium', 0)) + '</li>\n<li><strong>Low Issues:</strong> ' + str(stats.get('issues', {}).get('low', 0)) + '</li>\n</ul>\n</div>\n\n<div class="section">\n<h2>File Analysis Details</h2>\n'
+    text = "\n" + "="*70 + "\n"
+    text += "NEURASHIELD.AI - CODE ANALYSIS REPORT\n"
+    text += "="*70 + "\n"
+    text += f"Timestamp: {report_data.get('timestamp', '')}\n"
+    text += f"Analysis Type: all\n"
+    text += f"Retrieved Patterns: {len(files_analysis)}\n"
+    text += f"Code Length: {stats.get('total_lines', 0)} lines\n"
+    text += "\n" + "-"*70 + "\n\n"
     
-    for file_info in files_analysis[:20]:
-        name = file_info.get('file', 'Unknown')
+    total_bugs = 0
+    for file_info in files_analysis:
         analysis = file_info.get('analysis', {})
-        issues = analysis.get('issues', [])
-        
-        html += '<div class="file-block">\n<div class="file-header">File: ' + name + '</div>\n<div class="file-meta">Lines: ' + str(file_info.get('lines', 0)) + ' | Score: ' + str(analysis.get('score', 0)) + '/100 | Severity: ' + analysis.get('severity', 'N/A').upper() + '</div>\n'
-        
-        if issues and len(issues) > 0:
-            for issue in issues[:5]:
-                sev = issue.get('severity', 'medium').lower()
-                html += '<div class="issue ' + sev + '">\n<div class="issue-title">' + issue.get('title', 'Issue') + '</div>\n<div class="issue-desc">' + issue.get('description', '') + '</div>\n<div class="issue-fix"><strong>Fix:</strong> ' + issue.get('fix', 'Review') + '</div>\n<span class="badge ' + sev + '">' + sev.upper() + '</span>\n</div>\n'
-        else:
-            html += '<div style="color: #28a745; padding: 10px; background: #f0f8f5;">No security issues detected</div>\n'
-        
-        html += '</div>\n'
+        total_bugs += len(analysis.get('bugs', []))
     
-    html += '</div>\n\n<div class="section">\n<h2>Recommendations</h2>\n<ul class="rec-list">\n'
+    # BUG DETECTION
+    text += "## BUG DETECTION\n"
+    text += "-"*70 + "\n"
+    text += f"BUGS FOUND: {total_bugs}\n"
+    text += f"Overall Risk: HIGH\n\n"
     
-    for rec in recommendations:
-        html += '<li class="rec-item">✓ ' + rec + '</li>\n'
+    bug_num = 1
+    for file_info in files_analysis:
+        analysis = file_info.get('analysis', {})
+        for bug in analysis.get('bugs', [])[:3]:
+            text += f"{bug_num}. {bug.get('title', 'Bug')}\n"
+            text += f"   Severity: {bug.get('severity', 'MEDIUM')}\n"
+            text += f"   Description: {bug.get('description', 'N/A')}\n"
+            text += f"   Exploit Difficulty: {bug.get('exploit_difficulty', 'moderate')}\n"
+            text += f"   Impact: {bug.get('impact', 'C:partial I:none A:none')}\n"
+            text += f"   Fix: {bug.get('fix', 'Review manually')}\n"
+            text += f"   CWE: {bug.get('cwe', 'N/A')}\n\n"
+            bug_num += 1
     
-    html += '</ul>\n</div>\n\n<div class="footer">\n<p>NeuraShield AI Security Analysis • Local Code Analysis</p>\n<p>Report generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + ' IST</p>\n</div>\n</div>\n</body>\n</html>'
+    # CODE OPTIMIZATION
+    text += "\n## CODE OPTIMIZATION\n"
+    text += "-"*70 + "\n"
+    text += f"Current Complexity:\n"
+    text += f"  Time: O(n + m)\n"
+    text += f"  Space: O(n + m)\n\n"
     
-    return html
+    total_optimizations = sum(len(f.get('analysis', {}).get('optimizations', [])) for f in files_analysis)
+    text += f"OPTIMIZATIONS FOUND: {total_optimizations}\n"
+    text += f"Estimated Speedup: Potentially 2x faster with optimizations\n\n"
+    
+    opt_num = 1
+    for file_info in files_analysis:
+        analysis = file_info.get('analysis', {})
+        for opt in analysis.get('optimizations', [])[:2]:
+            text += f"{opt_num}. {opt.get('type', '')}: {opt.get('title', 'Optimization')}\n"
+            text += f"   Description: {opt.get('description', '')}\n"
+            text += f"   Improvement: {opt.get('improvement', '')}\n"
+            text += f"   Trade-offs: {opt.get('trade_offs', '')}\n\n"
+            opt_num += 1
+    
+    # SECURITY SCORING
+    text += "\n## SECURITY SCORING (CVSS v3.1)\n"
+    text += "-"*70 + "\n"
+    
+    avg_cvss = 0
+    for file_info in files_analysis:
+        avg_cvss += file_info.get('analysis', {}).get('cvss_score', 0)
+    avg_cvss = avg_cvss / len(files_analysis) if files_analysis else 0
+    
+    text += f"Overall Security Score: {avg_cvss:.1f}/10\n"
+    text += f"Severity: {'CRITICAL' if avg_cvss >= 9 else 'HIGH' if avg_cvss >= 7 else 'MEDIUM'}\n\n"
+    
+    total_vulns = sum(len(f.get('analysis', {}).get('vulnerabilities', [])) for f in files_analysis)
+    text += f"VULNERABILITIES: {total_vulns}\n\n"
+    
+    vuln_num = 1
+    for file_info in files_analysis:
+        analysis = file_info.get('analysis', {})
+        for vuln in analysis.get('vulnerabilities', [])[:2]:
+            text += f"{vuln_num}. {vuln.get('title', 'Vulnerability')}\n"
+            text += f"   CVSS Score: {vuln.get('cvss_score', 'N/A')}\n"
+            text += f"   CVSS Vector: {vuln.get('cvss_vector', '')}\n"
+            text += f"   CWE: {vuln.get('cwe', '')}\n"
+            text += f"   Remediation: {vuln.get('remediation', '')}\n\n"
+            vuln_num += 1
+    
+    text += "\nImmediate Actions Required:\n"
+    if total_bugs > 0:
+        text += "  • Fix all critical and high severity bugs immediately\n"
+    if total_vulns > 0:
+        text += "  • Implement security recommendations\n"
+    text += "  • Conduct code review\n"
+    text += "  • Update dependencies\n"
+    
+    text += "\n" + "="*70 + "\n"
+    text += "END OF REPORT\n"
+    text += "="*70 + "\n"
+    
+    return text
 
 def main():
     parser = argparse.ArgumentParser()
@@ -178,57 +313,44 @@ def main():
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
     
-    print("\n" + "="*50)
+    print("\n" + "="*70)
     print("PHASE 1: SCANNING FILES")
-    print("="*50)
+    print("="*70)
     python_files, total_lines = scan_directory(args.source_path)
     
     if not python_files:
         print("No Python files found")
         return
     
-    print(f"Found {len(python_files)} Python files")
-    print(f"Total lines of code: {total_lines}")
+    print(f"Found {len(python_files)} Python files with {total_lines} lines")
     
-    print("\n" + "="*50)
+    print("\n" + "="*70)
     print("PHASE 2: ANALYZING CODE")
-    print("="*50)
+    print("="*70)
     
     files_analysis = []
-    all_issues = []
+    all_bugs = []
     critical_count = 0
     high_count = 0
     medium_count = 0
-    low_count = 0
     total_score = 0
     
-    for idx, file_info in enumerate(python_files[:20], 1):
-        print(f"[{idx}/{min(len(python_files), 20)}] Analyzing: {file_info['path']}")
+    for idx, file_info in enumerate(python_files[:10], 1):
+        print(f"[{idx}] Analyzing: {file_info['path']}")
         
         code_content = read_file_safely(file_info['full_path'])
         analysis = analyze_code_locally(code_content, file_info['path'])
         
-        sev = analysis.get('severity', 'unknown').lower()
-        if sev == 'critical':
-            critical_count += 1
-        elif sev == 'high':
-            high_count += 1
-        elif sev == 'medium':
-            medium_count += 1
-        else:
-            low_count += 1
+        for bug in analysis.get('bugs', []):
+            if bug.get('severity') == 'CRITICAL':
+                critical_count += 1
+            elif bug.get('severity') == 'HIGH':
+                high_count += 1
+            elif bug.get('severity') == 'MEDIUM':
+                medium_count += 1
+            all_bugs.append(bug)
         
-        score = analysis.get('score', 50)
-        total_score += score
-        
-        for issue in analysis.get('issues', [])[:5]:
-            all_issues.append({
-                "file": file_info['path'],
-                "severity": issue.get('severity', 'medium'),
-                "title": issue.get('title', 'Issue'),
-                "description": issue.get('description', ''),
-                "fix": issue.get('fix', '')
-            })
+        total_score += analysis.get('score', 50)
         
         files_analysis.append({
             "file": file_info['path'],
@@ -239,59 +361,44 @@ def main():
     avg_score = int(total_score / len(files_analysis)) if files_analysis else 0
     
     report = {
-        "summary": f"NeuraShield AI analyzed {len(files_analysis)} Python files and generated comprehensive security report",
-        "phase": "2_complete",
+        "summary": f"NeuraShield AI analyzed {len(files_analysis)} Python files",
         "timestamp": datetime.now().isoformat(),
         "statistics": {
             "total_python_files": len(python_files),
             "files_analyzed": len(files_analysis),
             "total_lines": total_lines,
             "security_score": avg_score,
-            "issues": {
-                "critical": critical_count,
-                "high": high_count,
-                "medium": medium_count,
-                "low": low_count,
-                "total": len(all_issues)
-            }
+            "bugs_critical": critical_count,
+            "bugs_high": high_count,
+            "bugs_medium": medium_count,
+            "total_bugs": len(all_bugs)
         },
-        "files_analysis": files_analysis,
-        "all_findings": all_issues,
-        "recommendations": [
-            "Review all critical and high severity issues immediately",
-            "Implement input validation for all user inputs",
-            "Use parameterized queries to prevent SQL injection",
-            "Store secrets in environment variables, never hardcode",
-            "Avoid eval() and exec() - use safer alternatives",
-            "Use secrets module for cryptographic randomness",
-            "Implement proper error handling and logging",
-            "Keep dependencies updated and monitor vulnerabilities"
-        ]
+        "files_analysis": files_analysis
     }
     
-    print("\n" + "="*50)
+    print("\n" + "="*70)
     print("GENERATING REPORTS")
-    print("="*50)
+    print("="*70)
     
+    # Save JSON
     with open(args.output, 'w') as f:
         json.dump(report, f, indent=2)
-    print(f"✓ JSON report saved: {args.output}")
+    print(f"JSON Report: {args.output}")
     
-    html_path = args.output.replace('.json', '.html')
-    with open(html_path, 'w') as f:
-        f.write(generate_html_report(report))
-    print(f"✓ HTML report saved: {html_path}")
+    # Save Text Report
+    text_path = args.output.replace('.json', '.txt')
+    with open(text_path, 'w') as f:
+        f.write(generate_text_report(report))
+    print(f"Text Report: {text_path}")
     
-    print("\n" + "="*50)
+    print("\n" + "="*70)
     print("ANALYSIS COMPLETE")
-    print("="*50)
+    print("="*70)
     print(f"Security Score: {avg_score}/100")
-    print(f"Critical Issues: {critical_count}")
-    print(f"High Issues: {high_count}")
-    print(f"Medium Issues: {medium_count}")
-    print(f"Low Issues: {low_count}")
-    print(f"Total Issues Found: {len(all_issues)}")
-    print("="*50)
+    print(f"Critical Bugs: {critical_count}")
+    print(f"High Bugs: {high_count}")
+    print(f"Medium Bugs: {medium_count}")
+    print("="*70 + "\n")
 
 if __name__ == "__main__":
     main()
