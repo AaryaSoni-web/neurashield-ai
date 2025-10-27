@@ -25,8 +25,6 @@ jobs:
     name: Analyze Code
     runs-on: ubuntu-latest
     
-    # NO permissions block here - inherited from calling workflow
-    
     steps:
       - name: Checkout NeuraShield AI
         uses: actions/checkout@v4
@@ -79,69 +77,137 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            let commentBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
             
             try {
-              // Read the TEXT report file for complete details
-              if (fs.existsSync('neurashield-report.txt')) {
-                const textReport = fs.readFileSync('neurashield-report.txt', 'utf8');
-                
-                console.log('✅ Text report file found');
-                console.log(`Report length: ${textReport.length} characters`);
-                
-                // Post the FULL report in a code block
-                commentBody += '```\n';
-                commentBody += textReport;
-                commentBody += '\n```\n\n';
-                commentBody += '---\n';
-                commentBody += '📥 **Download Reports:** [JSON + TXT files available in workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n';
-                commentBody += '🔗 *Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
-                
-              } else if (fs.existsSync('neurashield-report.json')) {
-                // Fallback to JSON summary
-                console.log('⚠️ Text report not found, using JSON');
-                const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
-                const stats = report.statistics || {};
-                
-                commentBody += `${report.summary || 'Analysis completed'}\n\n`;
-                commentBody += '### 📊 Summary\n';
-                commentBody += `- Files: ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
-                commentBody += `- Lines: ${stats.total_lines || 0}\n`;
-                commentBody += `- Score: ${stats.security_score || 0}/100\n\n`;
-                commentBody += '### ⚠️ Issues\n';
-                commentBody += `- 🔴 Critical: ${stats.issues?.critical || 0}\n`;
-                commentBody += `- 🟠 High: ${stats.issues?.high || 0}\n`;
-                commentBody += `- 🟡 Medium: ${stats.issues?.medium || 0}\n`;
-                
-              } else {
-                console.error('❌ No report files found!');
-                commentBody += '❌ **Error:** Report files not found.\n\n';
-                commentBody += 'Please check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.';
+              if (!fs.existsSync('neurashield-report.json')) {
+                console.error('❌ Report file not found');
+                return;
               }
               
-            } catch (error) {
-              console.error('Error reading report:', error);
-              commentBody += '❌ **Error loading report:** ' + error.message;
-            }
-            
-            // Post the comment
-            const prNumber = ${{ inputs.pr-number }};
-            console.log(`Posting comment to PR #${prNumber}`);
-            console.log(`Repository: ${context.repo.owner}/${context.repo.repo}`);
-            console.log(`Comment length: ${commentBody.length} characters`);
-            
-            try {
+              const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
+              const stats = report.statistics || {};
+              const findings = report.all_findings || [];
+              const recommendations = report.recommendations || [];
+              
+              console.log('✅ Report loaded successfully');
+              
+              // Build the formatted comment
+              let commentBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
+              
+              // Summary Section
+              commentBody += '### 📊 Analysis Summary\n\n';
+              commentBody += `- **Files Analyzed:** ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
+              commentBody += `- **Total Lines:** ${stats.total_lines || 0}\n`;
+              commentBody += `- **Security Score:** ${stats.security_score || 0}/100\n`;
+              commentBody += `- **Timestamp:** ${new Date(report.timestamp).toLocaleString()}\n\n`;
+              
+              // Issues Overview
+              const criticalCount = stats.issues?.critical || 0;
+              const highCount = stats.issues?.high || 0;
+              const mediumCount = stats.issues?.medium || 0;
+              const totalIssues = stats.issues?.total || 0;
+              
+              const overallRisk = criticalCount > 0 ? '🔴 CRITICAL' : highCount > 0 ? '🟠 HIGH' : mediumCount > 0 ? '🟡 MEDIUM' : '🟢 LOW';
+              
+              commentBody += '### ⚠️ Issues Found\n\n';
+              commentBody += `**Overall Risk:** ${overallRisk}\n\n`;
+              commentBody += `| Severity | Count |\n`;
+              commentBody += `|----------|-------|\n`;
+              commentBody += `| 🔴 Critical | ${criticalCount} |\n`;
+              commentBody += `| 🟠 High | ${highCount} |\n`;
+              commentBody += `| 🟡 Medium | ${mediumCount} |\n`;
+              commentBody += `| **Total** | **${totalIssues}** |\n\n`;
+              
+              // Critical Issues Detail
+              const criticalFindings = findings.filter(f => f.severity === 'critical');
+              if (criticalFindings.length > 0) {
+                commentBody += '### 🔴 Critical Issues\n\n';
+                criticalFindings.slice(0, 5).forEach((finding, idx) => {
+                  commentBody += `#### ${idx + 1}. ${finding.title}\n\n`;
+                  commentBody += `- **File:** \`${finding.file}\`\n`;
+                  commentBody += `- **Type:** ${finding.type}\n`;
+                  if (finding.cwe) commentBody += `- **CWE:** ${finding.cwe}\n`;
+                  if (finding.cvss_score) commentBody += `- **CVSS Score:** ${finding.cvss_score}/10\n`;
+                  commentBody += `- **Description:** ${finding.description}\n`;
+                  if (finding.fix) commentBody += `- **Fix:** ${finding.fix}\n`;
+                  commentBody += '\n';
+                });
+              }
+              
+              // High Issues Detail
+              const highFindings = findings.filter(f => f.severity === 'high');
+              if (highFindings.length > 0) {
+                commentBody += '### 🟠 High Severity Issues\n\n';
+                highFindings.slice(0, 5).forEach((finding, idx) => {
+                  commentBody += `#### ${idx + 1}. ${finding.title}\n\n`;
+                  commentBody += `- **File:** \`${finding.file}\`\n`;
+                  commentBody += `- **Type:** ${finding.type}\n`;
+                  if (finding.cwe) commentBody += `- **CWE:** ${finding.cwe}\n`;
+                  if (finding.cvss_score) commentBody += `- **CVSS Score:** ${finding.cvss_score}/10\n`;
+                  commentBody += `- **Description:** ${finding.description}\n`;
+                  if (finding.fix) commentBody += `- **Fix:** ${finding.fix}\n`;
+                  commentBody += '\n';
+                });
+              }
+              
+              // Medium Issues Summary
+              const mediumFindings = findings.filter(f => f.severity === 'medium');
+              if (mediumFindings.length > 0) {
+                commentBody += '### 🟡 Medium Severity Issues\n\n';
+                commentBody += `Found ${mediumFindings.length} medium severity issue(s). `;
+                commentBody += `[View full report in artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.\n\n`;
+              }
+              
+              // Recommendations
+              if (recommendations.length > 0) {
+                commentBody += '### 📋 Recommendations\n\n';
+                recommendations.slice(0, 6).forEach(rec => {
+                  commentBody += `- ${rec}\n`;
+                });
+                commentBody += '\n';
+              }
+              
+              // Immediate Actions
+              if (criticalCount > 0 || highCount > 0) {
+                commentBody += '### ⚡ Immediate Actions Required\n\n';
+                if (criticalCount > 0) commentBody += '- 🚨 **Fix all critical issues before merging**\n';
+                if (highCount > 0) commentBody += '- ⚠️ Address high severity findings\n';
+                commentBody += '- 📝 Conduct thorough code review\n';
+                commentBody += '- 🔄 Update dependencies\n\n';
+              }
+              
+              // Merge Recommendation
+              commentBody += '### 🎯 Merge Recommendation\n\n';
+              if (criticalCount > 0) {
+                commentBody += '❌ **DO NOT MERGE** - Critical security issues must be resolved first.\n\n';
+              } else if (highCount >= 3 || stats.security_score < 50) {
+                commentBody += '⚠️ **REVIEW CAREFULLY** - Multiple high severity issues or low security score.\n\n';
+              } else if (highCount > 0 || (stats.security_score >= 50 && stats.security_score < 70)) {
+                commentBody += '⚠️ **CAUTION** - Review high severity issues before merging.\n\n';
+              } else {
+                commentBody += '✅ **SAFE TO MERGE** - No critical or major security concerns detected.\n\n';
+              }
+              
+              // Footer
+              commentBody += '---\n\n';
+              commentBody += '📥 **[Download Full Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})** (JSON + TXT)\n\n';
+              commentBody += '🔗 *Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
+              
+              // Post the comment
+              const prNumber = ${{ inputs.pr-number }};
+              console.log(`Posting formatted comment to PR #${prNumber}`);
+              
               const result = await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
                 body: commentBody
               });
+              
               console.log('✅ Comment posted successfully!');
-              console.log(`Comment ID: ${result.data.id}`);
               console.log(`Comment URL: ${result.data.html_url}`);
+              
             } catch (error) {
-              console.error('❌ Failed to post comment:', error.message);
-              if (error.status) console.error(`HTTP Status: ${error.status}`);
+              console.error('❌ Error:', error.message);
               throw error;
             }
