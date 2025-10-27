@@ -25,6 +25,8 @@ jobs:
     name: Analyze Code
     runs-on: ubuntu-latest
     
+    # NO permissions block here - inherited from calling workflow
+    
     steps:
       - name: Checkout NeuraShield AI
         uses: actions/checkout@v4
@@ -71,71 +73,75 @@ jobs:
       
       - name: Post Analysis Comment
         uses: actions/github-script@v7
-        if: always() && (inputs.pr-number || inputs.issue-number)
-        continue-on-error: true
+        if: always() && inputs.pr-number
+        continue-on-error: false
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            let reportBody = '⚠️ Analysis completed. Check workflow logs for details.';
+            let commentBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
             
             try {
-              // Read the TEXT report file instead of JSON for full details
+              // Read the TEXT report file for complete details
               if (fs.existsSync('neurashield-report.txt')) {
                 const textReport = fs.readFileSync('neurashield-report.txt', 'utf8');
                 
-                // Format the text report for GitHub markdown
-                reportBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
-                reportBody += '```\n';
-                reportBody += textReport;
-                reportBody += '\n```\n';
-                reportBody += '\n---\n';
-                reportBody += '*📥 Full reports (JSON + TXT) are available in the [workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})*\n';
-                reportBody += '*🔗 Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
+                console.log('✅ Text report file found');
+                console.log(`Report length: ${textReport.length} characters`);
                 
-                console.log('✅ Text report loaded and formatted');
+                // Post the FULL report in a code block
+                commentBody += '```\n';
+                commentBody += textReport;
+                commentBody += '\n```\n\n';
+                commentBody += '---\n';
+                commentBody += '📥 **Download Reports:** [JSON + TXT files available in workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n';
+                commentBody += '🔗 *Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
+                
               } else if (fs.existsSync('neurashield-report.json')) {
-                // Fallback to JSON summary if text file not found
+                // Fallback to JSON summary
+                console.log('⚠️ Text report not found, using JSON');
                 const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
                 const stats = report.statistics || {};
                 
-                reportBody = '## 🛡️ NeuraShield AI Analysis\n\n';
-                reportBody += `${report.summary || 'Analysis completed'}\n\n`;
-                reportBody += '### 📊 Analysis Summary\n';
-                reportBody += `- **Files Analyzed:** ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
-                reportBody += `- **Total Lines:** ${stats.total_lines || 0}\n`;
-                reportBody += `- **Security Score:** ${stats.security_score || 0}/100\n\n`;
-                reportBody += '### ⚠️ Issues Found\n';
-                reportBody += `- 🔴 Critical: ${stats.issues?.critical || 0}\n`;
-                reportBody += `- 🟠 High: ${stats.issues?.high || 0}\n`;
-                reportBody += `- 🟡 Medium: ${stats.issues?.medium || 0}\n\n`;
-                reportBody += '⚠️ **Note:** Full detailed report not found. Check workflow logs.\n';
+                commentBody += `${report.summary || 'Analysis completed'}\n\n`;
+                commentBody += '### 📊 Summary\n';
+                commentBody += `- Files: ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
+                commentBody += `- Lines: ${stats.total_lines || 0}\n`;
+                commentBody += `- Score: ${stats.security_score || 0}/100\n\n`;
+                commentBody += '### ⚠️ Issues\n';
+                commentBody += `- 🔴 Critical: ${stats.issues?.critical || 0}\n`;
+                commentBody += `- 🟠 High: ${stats.issues?.high || 0}\n`;
+                commentBody += `- 🟡 Medium: ${stats.issues?.medium || 0}\n`;
                 
-                console.log('✅ JSON report loaded (text report not found)');
               } else {
-                console.log('⚠️ No report files found');
+                console.error('❌ No report files found!');
+                commentBody += '❌ **Error:** Report files not found.\n\n';
+                commentBody += 'Please check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.';
               }
+              
             } catch (error) {
-              console.error('Error reading report:', error.message);
-              reportBody = '❌ **NeuraShield Analysis Failed**\n\n';
-              reportBody += 'Could not load analysis report. Please check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.';
+              console.error('Error reading report:', error);
+              commentBody += '❌ **Error loading report:** ' + error.message;
             }
             
-            const issueNumber = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
-            
-            if (!issueNumber) {
-              console.log('No issue/PR number, skipping comment');
-              return;
-            }
+            // Post the comment
+            const prNumber = ${{ inputs.pr-number }};
+            console.log(`Posting comment to PR #${prNumber}`);
+            console.log(`Repository: ${context.repo.owner}/${context.repo.repo}`);
+            console.log(`Comment length: ${commentBody.length} characters`);
             
             try {
-              await github.rest.issues.createComment({
+              const result = await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: reportBody
+                issue_number: prNumber,
+                body: commentBody
               });
-              console.log('✅ Comment posted successfully');
+              console.log('✅ Comment posted successfully!');
+              console.log(`Comment ID: ${result.data.id}`);
+              console.log(`Comment URL: ${result.data.html_url}`);
             } catch (error) {
-              console.error('Failed to post comment:', error.message);
+              console.error('❌ Failed to post comment:', error.message);
+              if (error.status) console.error(`HTTP Status: ${error.status}`);
               throw error;
             }
