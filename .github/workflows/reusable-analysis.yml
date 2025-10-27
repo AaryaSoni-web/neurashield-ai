@@ -25,9 +25,6 @@ jobs:
     name: Analyze Code
     runs-on: ubuntu-latest
     
-    # REMOVED permissions block - this is the fix!
-    # Permissions are inherited from the calling workflow
-    
     steps:
       - name: Checkout NeuraShield AI
         uses: actions/checkout@v4
@@ -67,7 +64,9 @@ jobs:
         if: always()
         with:
           name: neurashield-report
-          path: neurashield-report.json
+          path: |
+            neurashield-report.json
+            neurashield-report.txt
           retention-days: 30
       
       - name: Post Analysis Comment
@@ -78,44 +77,47 @@ jobs:
           script: |
             const fs = require('fs');
             let reportBody = '⚠️ Analysis completed. Check workflow logs for details.';
-            let commentDetails = '';
             
             try {
-              if (fs.existsSync('neurashield-report.json')) {
-                const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
-                reportBody = report.summary || 'Analysis completed';
+              // Read the TEXT report file instead of JSON for full details
+              if (fs.existsSync('neurashield-report.txt')) {
+                const textReport = fs.readFileSync('neurashield-report.txt', 'utf8');
                 
-                if (report.statistics) {
-                  const stats = report.statistics;
-                  const criticalCount = stats.issues?.critical || 0;
-                  const highCount = stats.issues?.high || 0;
-                  const mediumCount = stats.issues?.medium || 0;
-                  const filesAnalyzed = stats.files_analyzed || 0;
-                  const totalLines = stats.total_lines || 0;
-                  const securityScore = stats.security_score || 0;
-                  
-                  commentDetails = '\n\n### 📊 Analysis Summary\n';
-                  commentDetails += `- **Files Analyzed:** ${filesAnalyzed}\n`;
-                  commentDetails += `- **Total Lines:** ${totalLines}\n`;
-                  commentDetails += `- **Security Score:** ${securityScore}/100\n`;
-                  commentDetails += '\n### ⚠️ Issues Found\n';
-                  commentDetails += `- 🔴 Critical: ${criticalCount}\n`;
-                  commentDetails += `- 🟠 High: ${highCount}\n`;
-                  commentDetails += `- 🟡 Medium: ${mediumCount}\n`;
-                  
-                  if (report.recommendations && report.recommendations.length > 0) {
-                    commentDetails += '\n### 📋 Recommendations\n';
-                    report.recommendations.forEach(rec => {
-                      commentDetails += `- ${rec}\n`;
-                    });
-                  }
-                }
-                console.log('✅ Report file loaded');
+                // Format the text report for GitHub markdown
+                reportBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
+                reportBody += '```\n';
+                reportBody += textReport;
+                reportBody += '\n```\n';
+                reportBody += '\n---\n';
+                reportBody += '*📥 Full reports (JSON + TXT) are available in the [workflow artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})*\n';
+                reportBody += '*🔗 Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
+                
+                console.log('✅ Text report loaded and formatted');
+              } else if (fs.existsSync('neurashield-report.json')) {
+                // Fallback to JSON summary if text file not found
+                const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
+                const stats = report.statistics || {};
+                
+                reportBody = '## 🛡️ NeuraShield AI Analysis\n\n';
+                reportBody += `${report.summary || 'Analysis completed'}\n\n`;
+                reportBody += '### 📊 Analysis Summary\n';
+                reportBody += `- **Files Analyzed:** ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
+                reportBody += `- **Total Lines:** ${stats.total_lines || 0}\n`;
+                reportBody += `- **Security Score:** ${stats.security_score || 0}/100\n\n`;
+                reportBody += '### ⚠️ Issues Found\n';
+                reportBody += `- 🔴 Critical: ${stats.issues?.critical || 0}\n`;
+                reportBody += `- 🟠 High: ${stats.issues?.high || 0}\n`;
+                reportBody += `- 🟡 Medium: ${stats.issues?.medium || 0}\n\n`;
+                reportBody += '⚠️ **Note:** Full detailed report not found. Check workflow logs.\n';
+                
+                console.log('✅ JSON report loaded (text report not found)');
               } else {
-                console.log('⚠️ Report file not found');
+                console.log('⚠️ No report files found');
               }
             } catch (error) {
               console.error('Error reading report:', error.message);
+              reportBody = '❌ **NeuraShield Analysis Failed**\n\n';
+              reportBody += 'Could not load analysis report. Please check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.';
             }
             
             const issueNumber = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
@@ -126,14 +128,14 @@ jobs:
             }
             
             try {
-              const finalBody = `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}${commentDetails}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`;
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: finalBody
+                body: reportBody
               });
-              console.log('✅ Comment posted');
+              console.log('✅ Comment posted successfully');
             } catch (error) {
               console.error('Failed to post comment:', error.message);
+              throw error;
             }
