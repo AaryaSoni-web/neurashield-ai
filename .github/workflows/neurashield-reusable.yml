@@ -1,4 +1,9 @@
 name: NeuraShield Reusable Analysis
+permissions:
+  contents: read          # Read repository contents
+  issues: write           # Write comments to issues
+  pull-requests: write    # Write comments to PRs
+  actions: read           # Read workflow runs
 
 on:
   workflow_call:
