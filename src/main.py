@@ -28,36 +28,29 @@ def analyze_code_with_ai(code_content, filename):
                 "issues": [{"title": "Small file", "description": "File too small to analyze", "fix": "N/A"}]
             }
         
-        prompt = f"""Analyze this Python code for security issues and return ONLY JSON.
-
-Code:
-{code_content[:500]}
-
-JSON format (no markdown):
-{{"severity": "critical/high/medium/low", "score": 0-100, "issues": [{{"title": "string", "description": "string", "severity": "high/medium/low", "fix": "string"}}]}}"""
+        prompt = f"""Analyze Python code for security.
+Code: {code_content[:400]}
+Return ONLY JSON: {{"severity":"high/medium/low","score":0-100,"issues":[{{"title":"str","description":"str","severity":"high/medium/low","fix":"str"}}]}}"""
 
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a security expert. Return only valid JSON, no markdown or explanation."},
+                {"role": "system", "content": "Return only valid JSON"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
             max_tokens=800
         )
         
-        response_text = response.choices[0].message.content.strip()
+        text = response.choices[0].message.content.strip()
         
-        # Remove markdown if present
-        if response_text.startswith('```
-            lines = response_text.split('\n')
-            json_lines = ```')]
-            response_text = '\n'.join(json_lines)
+        if text.count(chr(96)) >= 2:
+            lines = text.split('\n')
+            json_lines = [l for l in lines if not l.startswith(chr(96))]
+            text = '\n'.join(json_lines)
         
-        # Parse JSON
-        result = json.loads(response_text)
+        result = json.loads(text)
         
-        # Ensure all required fields
         if 'severity' not in result:
             result['severity'] = 'medium'
         if 'score' not in result:
@@ -67,19 +60,17 @@ JSON format (no markdown):
         
         return result
     
-    except json.JSONDecodeError as e:
-        print(f"JSON error: {e}")
+    except json.JSONDecodeError:
         return {
             "severity": "medium",
             "score": 60,
-            "issues": [{"title": "Analysis Error", "description": f"Failed to parse response: {str(e)}", "severity": "medium", "fix": "Review manually"}]
+            "issues": [{"title": "Parse Error", "description": "JSON parsing failed", "severity": "medium", "fix": "Review manually"}]
         }
     except Exception as e:
-        print(f"API error: {str(e)}")
         return {
             "severity": "medium",
             "score": 50,
-            "issues": [{"title": "API Error", "description": str(e), "severity": "high", "fix": "Check OpenAI API key"}]
+            "issues": [{"title": "API Error", "description": str(e), "severity": "high", "fix": "Check API key"}]
         }
 
 def scan_directory(source_path):
@@ -110,143 +101,33 @@ def generate_html_report(report_data):
     stats = report_data.get('statistics', {})
     files_analysis = report_data.get('files_analysis', [])
     recommendations = report_data.get('recommendations', [])
-    
     score = stats.get('security_score', 0)
     
-    html = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>NeuraShield Security Report</title>
-<style>
-body { font-family: Segoe UI, Arial; background: #f5f5f5; padding: 20px; }
-.container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-.header { border-bottom: 3px solid #4CAF50; margin-bottom: 30px; padding-bottom: 20px; }
-h1 { color: #333; margin: 0; font-size: 32px; }
-.timestamp { color: #666; font-size: 14px; margin-top: 10px; }
-.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }
-.metric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 8px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-.metric.critical { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); }
-.metric.high { background: linear-gradient(135deg, #ffa502 0%, #ffb84d 100%); }
-.metric.good { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-.metric h3 { font-size: 36px; margin: 0; font-weight: bold; }
-.metric p { font-size: 13px; margin: 8px 0 0 0; opacity: 0.95; }
-.section { margin: 40px 0; }
-.section h2 { color: #333; font-size: 24px; border-bottom: 2px solid #eee; padding-bottom: 12px; margin: 0 0 20px 0; }
-.summary-list { list-style: none; padding: 0; }
-.summary-list li { padding: 8px 0; color: #555; font-size: 15px; border-bottom: 1px solid #f0f0f0; }
-.summary-list strong { color: #333; }
-.file-block { background: #f9f9f9; border-left: 5px solid #4CAF50; padding: 20px; margin: 15px 0; border-radius: 4px; }
-.file-header { font-weight: bold; font-size: 16px; color: #333; margin-bottom: 10px; }
-.file-meta { color: #666; font-size: 13px; margin-bottom: 12px; }
-.issue { background: white; border-left: 4px solid #ff6b6b; padding: 15px; margin: 12px 0; border-radius: 3px; }
-.issue.critical { border-left-color: #f5576c; }
-.issue.high { border-left-color: #ffa502; }
-.issue.medium { border-left-color: #4facfe; }
-.issue.low { border-left-color: #28a745; }
-.issue-title { font-weight: bold; color: #333; font-size: 15px; margin-bottom: 5px; }
-.issue-desc { color: #666; font-size: 13px; margin: 5px 0; line-height: 1.5; }
-.issue-fix { background: #f0f0f0; padding: 8px; margin: 8px 0; border-radius: 3px; font-size: 12px; }
-.issue-fix strong { color: #333; }
-.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 8px; }
-.badge.critical { background: #f5576c; color: white; }
-.badge.high { background: #ffa502; color: white; }
-.badge.medium { background: #4facfe; color: white; }
-.badge.low { background: #28a745; color: white; }
-.rec-list { list-style: none; padding: 0; }
-.rec-item { background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 12px; margin: 10px 0; border-radius: 3px; color: #2e7d32; }
-.footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; text-align: center; }
-</style>
-</head>
-<body>
-<div class="container">
-<div class="header">
-<h1>🛡️ NeuraShield AI Security Analysis Report</h1>
-<p class="timestamp">Generated: """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + """ IST</p>
-</div>
-
-<div class="metrics">
-<div class="metric">
-<h3>""" + str(stats.get('total_python_files', 0)) + """</h3>
-<p>Total Files</p>
-</div>
-<div class="metric critical">
-<h3>""" + str(stats.get('issues', {}).get('critical', 0)) + """</h3>
-<p>Critical Issues</p>
-</div>
-<div class="metric high">
-<h3>""" + str(stats.get('issues', {}).get('high', 0)) + """</h3>
-<p>High Issues</p>
-</div>
-<div class="metric good">
-<h3>""" + str(score) + """%</h3>
-<p>Security Score</p>
-</div>
-</div>
-
-<div class="section">
-<h2>📊 Analysis Summary</h2>
-<ul class="summary-list">
-<li><strong>Total Python Files:</strong> """ + str(stats.get('total_python_files', 0)) + """</li>
-<li><strong>Files Analyzed:</strong> """ + str(stats.get('files_analyzed', 0)) + """</li>
-<li><strong>Total Lines of Code:</strong> """ + str(stats.get('total_lines', 0)) + """</li>
-<li><strong>Security Score:</strong> """ + str(stats.get('security_score', 0)) + """/100</li>
-<li><strong>Critical Issues:</strong> """ + str(stats.get('issues', {}).get('critical', 0)) + """</li>
-<li><strong>High Issues:</strong> """ + str(stats.get('issues', {}).get('high', 0)) + """</li>
-<li><strong>Medium Issues:</strong> """ + str(stats.get('issues', {}).get('medium', 0)) + """</li>
-<li><strong>Low Issues:</strong> """ + str(stats.get('issues', {}).get('low', 0)) + """</li>
-</ul>
-</div>
-
-<div class="section">
-<h2>📁 File Analysis Details</h2>
-"""
+    html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>NeuraShield Report</title>\n<style>\nbody { font-family: Segoe UI, Arial; background: #f5f5f5; padding: 20px; }\n.container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }\n.header { border-bottom: 3px solid #4CAF50; margin-bottom: 30px; padding-bottom: 20px; }\nh1 { color: #333; margin: 0; font-size: 32px; }\n.timestamp { color: #666; font-size: 14px; margin-top: 10px; }\n.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }\n.metric { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 8px; text-align: center; }\n.metric.critical { background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%); }\n.metric.high { background: linear-gradient(135deg, #ffa502 0%, #ffb84d 100%); }\n.metric.good { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }\n.metric h3 { font-size: 36px; margin: 0; font-weight: bold; }\n.metric p { font-size: 13px; margin: 8px 0 0 0; }\n.section { margin: 40px 0; }\n.section h2 { color: #333; font-size: 24px; border-bottom: 2px solid #eee; padding-bottom: 12px; margin: 0 0 20px 0; }\n.summary-list { list-style: none; padding: 0; }\n.summary-list li { padding: 8px 0; color: #555; font-size: 15px; border-bottom: 1px solid #f0f0f0; }\n.summary-list strong { color: #333; }\n.file-block { background: #f9f9f9; border-left: 5px solid #4CAF50; padding: 20px; margin: 15px 0; border-radius: 4px; }\n.file-header { font-weight: bold; font-size: 16px; color: #333; margin-bottom: 10px; }\n.file-meta { color: #666; font-size: 13px; margin-bottom: 12px; }\n.issue { background: white; border-left: 4px solid #ff6b6b; padding: 15px; margin: 12px 0; border-radius: 3px; }\n.issue.critical { border-left-color: #f5576c; }\n.issue.high { border-left-color: #ffa502; }\n.issue.medium { border-left-color: #4facfe; }\n.issue.low { border-left-color: #28a745; }\n.issue-title { font-weight: bold; color: #333; font-size: 15px; margin-bottom: 5px; }\n.issue-desc { color: #666; font-size: 13px; margin: 5px 0; line-height: 1.5; }\n.issue-fix { background: #f0f0f0; padding: 8px; margin: 8px 0; border-radius: 3px; font-size: 12px; }\n.issue-fix strong { color: #333; }\n.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; margin-top: 8px; }\n.badge.critical { background: #f5576c; color: white; }\n.badge.high { background: #ffa502; color: white; }\n.badge.medium { background: #4facfe; color: white; }\n.badge.low { background: #28a745; color: white; }\n.rec-list { list-style: none; padding: 0; }\n.rec-item { background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 12px; margin: 10px 0; border-radius: 3px; color: #2e7d32; }\n.footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; text-align: center; }\n</style>\n</head>\n<body>\n<div class="container">\n<div class="header">\n<h1>Shield AI Security Analysis Report</h1>\n<p class="timestamp">Generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + ' IST</p>\n</div>\n\n<div class="metrics">\n<div class="metric">\n<h3>' + str(stats.get('total_python_files', 0)) + '</h3>\n<p>Total Files</p>\n</div>\n<div class="metric critical">\n<h3>' + str(stats.get('issues', {}).get('critical', 0)) + '</h3>\n<p>Critical Issues</p>\n</div>\n<div class="metric high">\n<h3>' + str(stats.get('issues', {}).get('high', 0)) + '</h3>\n<p>High Issues</p>\n</div>\n<div class="metric good">\n<h3>' + str(score) + '%</h3>\n<p>Security Score</p>\n</div>\n</div>\n\n<div class="section">\n<h2>Analysis Summary</h2>\n<ul class="summary-list">\n<li><strong>Total Files:</strong> ' + str(stats.get('total_python_files', 0)) + '</li>\n<li><strong>Files Analyzed:</strong> ' + str(stats.get('files_analyzed', 0)) + '</li>\n<li><strong>Total Lines:</strong> ' + str(stats.get('total_lines', 0)) + '</li>\n<li><strong>Security Score:</strong> ' + str(stats.get('security_score', 0)) + '/100</li>\n<li><strong>Critical:</strong> ' + str(stats.get('issues', {}).get('critical', 0)) + '</li>\n<li><strong>High:</strong> ' + str(stats.get('issues', {}).get('high', 0)) + '</li>\n<li><strong>Medium:</strong> ' + str(stats.get('issues', {}).get('medium', 0)) + '</li>\n<li><strong>Low:</strong> ' + str(stats.get('issues', {}).get('low', 0)) + '</li>\n</ul>\n</div>\n\n<div class="section">\n<h2>File Analysis</h2>\n'
     
     for file_info in files_analysis[:15]:
         name = file_info.get('file', 'Unknown')
         analysis = file_info.get('analysis', {})
         issues = analysis.get('issues', [])
         
-        html += '<div class="file-block">\n'
-        html += '<div class="file-header">📄 ' + name + '</div>\n'
-        html += '<div class="file-meta">Lines: ' + str(file_info.get('lines', 0)) + ' | Security Score: ' + str(analysis.get('score', 0)) + '/100 | Severity: ' + analysis.get('severity', 'N/A').upper() + '</div>\n'
+        html += '<div class="file-block">\n<div class="file-header">File: ' + name + '</div>\n<div class="file-meta">Lines: ' + str(file_info.get('lines', 0)) + ' | Score: ' + str(analysis.get('score', 0)) + '/100 | Severity: ' + analysis.get('severity', 'N/A').upper() + '</div>\n'
         
         if issues and len(issues) > 0:
             for issue in issues[:5]:
                 sev = issue.get('severity', 'medium').lower()
-                html += '<div class="issue ' + sev + '">\n'
-                html += '<div class="issue-title">' + issue.get('title', 'Issue') + '</div>\n'
-                html += '<div class="issue-desc">' + issue.get('description', '') + '</div>\n'
-                html += '<div class="issue-fix"><strong>Fix:</strong> ' + issue.get('fix', 'Review manually') + '</div>\n'
-                html += '<span class="badge ' + sev + '">' + sev.upper() + '</span>\n'
-                html += '</div>\n'
+                html += '<div class="issue ' + sev + '">\n<div class="issue-title">' + issue.get('title', 'Issue') + '</div>\n<div class="issue-desc">' + issue.get('description', '') + '</div>\n<div class="issue-fix"><strong>Fix:</strong> ' + issue.get('fix', 'Review') + '</div>\n<span class="badge ' + sev + '">' + sev.upper() + '</span>\n</div>\n'
         else:
-            html += '<div style="color: #28a745; padding: 10px; background: #f0f8f5; border-radius: 3px;">✅ No security issues detected</div>\n'
+            html += '<div style="color: #28a745; padding: 10px;">No issues detected</div>\n'
         
         html += '</div>\n'
     
-    html += """</div>
-
-<div class="section">
-<h2>📋 Recommendations</h2>
-<ul class="rec-list">
-"""
+    html += '</div>\n\n<div class="section">\n<h2>Recommendations</h2>\n<ul class="rec-list">\n'
     
     for rec in recommendations:
-        html += '<li class="rec-item">✓ ' + rec + '</li>\n'
+        html += '<li class="rec-item">' + rec + '</li>\n'
     
-    html += """</ul>
-</div>
-
-<div class="footer">
-<p><strong>NeuraShield AI Security Analysis</strong> • Powered by OpenAI GPT-3.5 Turbo</p>
-<p>Report generated on """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + """ IST</p>
-<p><a href="https://github.com/AaryaSoni-web/neurashield-ai" style="color: #4CAF50; text-decoration: none;">View on GitHub →</a></p>
-</div>
-</div>
-</body>
-</html>
-"""
+    html += '</ul>\n</div>\n\n<div class="footer">\n<p>NeuraShield AI Security Analysis powered by OpenAI</p>\n</div>\n</div>\n</body>\n</html>'
+    
     return html
 
 def main():
@@ -255,16 +136,14 @@ def main():
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
     
-    print(f"🔍 Phase 1: Scanning {args.source_path}...")
+    print("Phase 1: Scanning files...")
     python_files, total_lines = scan_directory(args.source_path)
     
     if not python_files:
-        print("❌ No Python files found")
+        print("No Python files found")
         return
     
-    print(f"✅ Found {len(python_files)} Python files with {total_lines} lines")
-    
-    print(f"\n🤖 Phase 2: AI Analysis starting...")
+    print("Phase 2: AI Analysis...")
     
     files_analysis = []
     all_issues = []
@@ -275,7 +154,7 @@ def main():
     total_score = 0
     
     for idx, file_info in enumerate(python_files[:10], 1):
-        print(f"  [{idx}/{min(len(python_files), 10)}] Analyzing {file_info['path']}...")
+        print(f"Analyzing {file_info['path']}...")
         
         code_content = read_file_safely(file_info['full_path'])
         analysis = analyze_code_with_ai(code_content, file_info['path'])
@@ -311,7 +190,7 @@ def main():
     avg_score = int(total_score / len(files_analysis)) if files_analysis else 0
     
     report = {
-        "summary": f"NeuraShield AI analyzed {len(files_analysis)} Python files and generated comprehensive security report",
+        "summary": "NeuraShield AI analyzed Python files",
         "phase": "2_complete",
         "timestamp": datetime.now().isoformat(),
         "statistics": {
@@ -334,10 +213,10 @@ def main():
             "Implement automated code quality checks in CI/CD pipeline",
             "Use security linters: bandit, pylint, flake8",
             "Setup pre-commit hooks for code analysis",
-            "Conduct regular security audits and penetration testing",
-            "Implement comprehensive input validation and output encoding",
-            "Never hardcode secrets - use environment variables and secure vaults",
-            "Keep all dependencies updated and monitor for vulnerabilities with Dependabot"
+            "Regular security audits and penetration testing",
+            "Implement input validation and output encoding",
+            "Never hardcode secrets - use environment variables",
+            "Keep dependencies updated and monitor vulnerabilities"
         ]
     }
     
@@ -348,11 +227,8 @@ def main():
     with open(html_path, 'w') as f:
         f.write(generate_html_report(report))
     
-    print(f"\n✅ Analysis complete!")
-    print(f"📄 JSON Report: {args.output}")
-    print(f"🌐 HTML Report: {html_path}")
-    print(f"🔐 Security Score: {avg_score}/100")
-    print(f"⚠️ Total Issues Found: {len(all_issues)}")
+    print("Analysis complete!")
+    print(f"Score: {avg_score}/100")
 
 if __name__ == "__main__":
     main()
