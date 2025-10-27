@@ -1,8 +1,6 @@
 import argparse
 import json
 import os
-import sys
-from pathlib import Path
 from datetime import datetime
 
 try:
@@ -26,7 +24,7 @@ def analyze_code_with_ai(code_content, filename):
         prompt = f"""Analyze Python code for security issues.
 File: {filename}
 Code: {code_content}
-Return ONLY JSON with: severity, score (0-100), issues array with title/description/fix"""
+Return ONLY JSON: severity, score (0-100), issues with title/description/fix"""
 
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -38,14 +36,14 @@ Return ONLY JSON with: severity, score (0-100), issues array with title/descript
             max_tokens=1500
         )
         
-        text = response.choices[0].message.content
+        text = response.choices[0].message.content.strip()
         
-        # Remove markdown wrappers
-        if text.count('```
-            parts = text.split('```')
+        backtick_count = text.count('`')
+        if backtick_count >= 2:
+            parts = text.split('`')
             text = parts[1]
             if text.startswith('json'):
-                text = text[4:]
+                text = text[4:].strip()
         
         return json.loads(text)
     
@@ -53,7 +51,7 @@ Return ONLY JSON with: severity, score (0-100), issues array with title/descript
         return {
             "severity": "medium",
             "score": 50,
-            "issues": [{"title": "Analysis failed", "description": "Manual review needed", "fix": "Check code"}]
+            "issues": [{"title": "Analysis failed", "description": "Manual review", "fix": "Review code"}]
         }
     except Exception as e:
         return {
@@ -93,55 +91,55 @@ def generate_html_report(report_data):
     
     score = stats.get('security_score', 0)
     
-    html = f"""<!DOCTYPE html>
+    html = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <title>NeuraShield Report</title>
 <style>
-body {{ font-family: Arial; background: #f5f5f5; padding: 20px; }}
-.container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; }}
-.header {{ border-bottom: 3px solid #4CAF50; margin-bottom: 30px; }}
-h1 {{ color: #333; margin: 0 0 10px 0; }}
-.timestamp {{ color: #666; font-size: 12px; }}
-.metrics {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }}
-.metric {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
-.metric h3 {{ font-size: 28px; margin: 0; }}
-.metric p {{ font-size: 12px; margin: 5px 0 0 0; }}
-.section {{ margin: 30px 0; }}
-.section h2 {{ color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
-.file-block {{ background: #f9f9f9; border-left: 4px solid #4CAF50; padding: 15px; margin: 15px 0; }}
-.issue {{ background: white; border-left: 4px solid #ff6b6b; padding: 10px; margin: 10px 0; }}
-.issue.high {{ border-left-color: #f5576c; }}
-.issue.medium {{ border-left-color: #ffa502; }}
-.severity {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-top: 5px; }}
-.severity.high {{ background: #ffa502; color: white; }}
-.severity.medium {{ background: #4facfe; color: white; }}
-.recommendation {{ background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 10px; margin: 8px 0; }}
+body { font-family: Arial; background: #f5f5f5; padding: 20px; }
+.container { max-width: 1000px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; }
+.header { border-bottom: 3px solid #4CAF50; margin-bottom: 30px; }
+h1 { color: #333; margin: 0 0 10px 0; }
+.timestamp { color: #666; font-size: 12px; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }
+.metric { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; border-radius: 8px; text-align: center; }
+.metric h3 { font-size: 28px; margin: 0; }
+.metric p { font-size: 12px; margin: 5px 0 0 0; }
+.section { margin: 30px 0; }
+.section h2 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+.file-block { background: #f9f9f9; border-left: 4px solid #4CAF50; padding: 15px; margin: 15px 0; }
+.issue { background: white; border-left: 4px solid #ff6b6b; padding: 10px; margin: 10px 0; }
+.issue.high { border-left-color: #f5576c; }
+.issue.medium { border-left-color: #ffa502; }
+.severity { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-top: 5px; }
+.severity.high { background: #ffa502; color: white; }
+.severity.medium { background: #4facfe; color: white; }
+.recommendation { background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 10px; margin: 8px 0; }
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
 <h1>NeuraShield AI Security Report</h1>
-<p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} IST</p>
+<p class="timestamp">Generated: """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + """ IST</p>
 </div>
 
 <div class="metrics">
 <div class="metric">
-<h3>{stats.get('total_python_files', 0)}</h3>
+<h3>""" + str(stats.get('total_python_files', 0)) + """</h3>
 <p>Files</p>
 </div>
 <div class="metric">
-<h3>{stats.get('issues', {}).get('critical', 0)}</h3>
+<h3>""" + str(stats.get('issues', {}).get('critical', 0)) + """</h3>
 <p>Critical</p>
 </div>
 <div class="metric">
-<h3>{stats.get('issues', {}).get('high', 0)}</h3>
+<h3>""" + str(stats.get('issues', {}).get('high', 0)) + """</h3>
 <p>High</p>
 </div>
 <div class="metric">
-<h3>{score}/100</h3>
+<h3>""" + str(score) + """/100</h3>
 <p>Score</p>
 </div>
 </div>
@@ -149,14 +147,14 @@ h1 {{ color: #333; margin: 0 0 10px 0; }}
 <div class="section">
 <h2>Summary</h2>
 <ul>
-<li>Total Files: {stats.get('total_python_files', 0)}</li>
-<li>Analyzed: {stats.get('files_analyzed', 0)}</li>
-<li>Lines: {stats.get('total_lines', 0)}</li>
-<li>Score: {stats.get('security_score', 0)}/100</li>
-<li>Critical: {stats.get('issues', {}).get('critical', 0)}</li>
-<li>High: {stats.get('issues', {}).get('high', 0)}</li>
-<li>Medium: {stats.get('issues', {}).get('medium', 0)}</li>
-<li>Low: {stats.get('issues', {}).get('low', 0)}</li>
+<li>Total Files: """ + str(stats.get('total_python_files', 0)) + """</li>
+<li>Analyzed: """ + str(stats.get('files_analyzed', 0)) + """</li>
+<li>Lines: """ + str(stats.get('total_lines', 0)) + """</li>
+<li>Score: """ + str(stats.get('security_score', 0)) + """/100</li>
+<li>Critical: """ + str(stats.get('issues', {}).get('critical', 0)) + """</li>
+<li>High: """ + str(stats.get('issues', {}).get('high', 0)) + """</li>
+<li>Medium: """ + str(stats.get('issues', {}).get('medium', 0)) + """</li>
+<li>Low: """ + str(stats.get('issues', {}).get('low', 0)) + """</li>
 </ul>
 </div>
 
@@ -169,39 +167,29 @@ h1 {{ color: #333; margin: 0 0 10px 0; }}
         analysis = file_info.get('analysis', {})
         issues = analysis.get('issues', [])
         
-        html += f"""
-<div class="file-block">
-<strong>{name}</strong> ({file_info.get('lines', 0)} lines, Score: {analysis.get('score', 0)}/100)
-"""
+        html += '<div class="file-block">\n'
+        html += '<strong>' + name + '</strong> (' + str(file_info.get('lines', 0)) + ' lines, Score: ' + str(analysis.get('score', 0)) + '/100)\n'
         
         if issues:
             for issue in issues[:3]:
                 sev = issue.get('severity', 'medium').lower()
-                html += f"""
-<div class="issue {sev}">
-<strong>{issue.get('title', 'Issue')}</strong><br>
-{issue.get('description', '')}<br>
-<strong>Fix:</strong> {issue.get('fix', 'N/A')}<br>
-<span class="severity {sev}">{sev.upper()}</span>
-</div>
-"""
+                html += '<div class="issue ' + sev + '">\n'
+                html += '<strong>' + issue.get('title', 'Issue') + '</strong><br>\n'
+                html += issue.get('description', '') + '<br>\n'
+                html += '<strong>Fix:</strong> ' + issue.get('fix', 'N/A') + '<br>\n'
+                html += '<span class="severity ' + sev + '">' + sev.upper() + '</span>\n'
+                html += '</div>\n'
         else:
-            html += "<p style='color: #28a745;'>✓ No issues</p>"
+            html += "<p style='color: #28a745;'>✓ No issues</p>\n"
         
-        html += "</div>"
+        html += '</div>\n'
     
-    html += """
-</div>
-
-<div class="section">
-<h2>Recommendations</h2>
-"""
+    html += '</div>\n\n<div class="section">\n<h2>Recommendations</h2>\n'
     
     for rec in recommendations:
-        html += f"<div class='recommendation'>✓ {rec}</div>"
+        html += "<div class='recommendation'>✓ " + rec + "</div>\n"
     
-    html += """
-</div>
+    html += """</div>
 
 <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; text-align: center;">
 <p>NeuraShield AI • Powered by OpenAI</p>
