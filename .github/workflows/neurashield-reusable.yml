@@ -1,239 +1,128 @@
-name: NeuraShield Reusable Analysis
-permissions:
-  contents: read          # Read repository contents
-  issues: write           # Write comments to issues
-  pull-requests: write    # Write comments to PRs
-  actions: read           # Read workflow runs
+name: Reusable NeuraShield Analysis
 
 on:
   workflow_call:
+    inputs:
+      source-repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      pr-number:
+        description: 'Pull request number'
+        required: false
+        type: number
+      issue-number:
+        description: 'Issue number'
+        required: false
+        type: number
     secrets:
       OPENAI_API_KEY:
-        description: 'OpenAI API key for NeuraShield analysis'
+        description: 'OpenAI API Key for analysis'
         required: true
-    inputs:
-      python_version:
-        description: 'Python version to use'
-        required: false
-        type: string
-        default: '3.11'
-      analysis_type:
-        description: 'Type of analysis to run'
-        required: false
-        type: string
-        default: 'all'
-      fail_on_critical:
-        description: 'Whether to fail on critical issues'
-        required: false
-        type: boolean
-        default: true
 
 jobs:
-  neurashield-scan:
+  analyze:
+    name: Analyze Code
     runs-on: ubuntu-latest
     
+    # CRITICAL: Permissions block to fix 403 errors
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    
     steps:
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      
-      - name: Checkout NeuraShield AI engine
+      - name: Checkout NeuraShield AI
         uses: actions/checkout@v4
         with:
           repository: AaryaSoni-web/neurashield-ai
-          path: neurashield-engine
-          ref: main
+          path: neurashield-ai
       
-      - name: Set up Python
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source-repo }}
+          path: source-code
+      
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: '3.11'
           cache: 'pip'
       
-      - name: Install NeuraShield dependencies
+      - name: Install Dependencies
+        working-directory: neurashield-ai
         run: |
           pip install --upgrade pip
-          pip install -r neurashield-engine/requirements.txt
-        continue-on-error: false
+          pip install -r requirements.txt
       
-      - name: Initialize ChromaDB vector store
-        run: |
-          if [ ! -d "neurashield-engine/phase_1/chroma_db" ]; then
-            echo "📦 ChromaDB not found. Initializing vector store..."
-            cd neurashield-engine
-            python phase1_pipeline.py
-            cd ..
-          else
-            echo "✅ Using existing ChromaDB"
-          fi
+      - name: Run NeuraShield Analysis
+        working-directory: neurashield-ai
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        continue-on-error: false
+        run: |
+          python src/main.py \
+            --source-path ../source-code \
+            --output ../neurashield-report.json
       
-      - name: Get changed Python files
-        id: changed-files
-        uses: tj-actions/changed-files@v42
+      # CHANGE 3: Artifact handling with error resilience
+      - name: Save Analysis Report
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          files: |
-            **/*.py
-            !.github/**
-            !.githooks/**
-            !**/test_*.py
-            !**/tests/**
+          name: neurashield-report
+          path: neurashield-report.json
+          retention-days: 30
       
-      - name: Display changed files
-        run: |
-          if [ "${{ steps.changed-files.outputs.any_changed }}" == "true" ]; then
-            echo "🔍 Changed Python files detected:"
-            echo "${{ steps.changed-files.outputs.all_changed_files }}"
-          else
-            echo "⚠️ No Python files changed in this PR"
-          fi
-      
-      - name: Run NeuraShield AI analysis
-        if: steps.changed-files.outputs.any_changed == 'true'
-        id: analysis
-        run: |
-          export PYTHONPATH=${{ github.workspace }}/neurashield-engine:$PYTHONPATH
-          
-          echo "🛡️ Starting NeuraShield AI analysis..."
-          echo "Changed files: ${{ steps.changed-files.outputs.all_changed_files }}"
-          
-          cd neurashield-engine
-          
-          # Run analysis
-          python .github/scripts/pr_analyzer.py ${{ steps.changed-files.outputs.all_changed_files }}
-          
-          # Check if files were created
-          if [ -f "pr_analysis_results.json" ]; then
-            echo "✅ Results file created"
-            cp pr_analysis_results.json ${{ github.workspace }}/
-          else
-            echo "❌ ERROR: Results file not created"
-            exit 1
-          fi
-          
-          if [ -f "pr_analysis_report.md" ]; then
-            echo "✅ Report file created"
-            cp pr_analysis_report.md ${{ github.workspace }}/
-          else
-            echo "❌ ERROR: Report file not created"
-            exit 1
-          fi
-          
-          cd ${{ github.workspace }}
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        continue-on-error: false
-      
-      - name: Verify analysis files
-        if: steps.changed-files.outputs.any_changed == 'true' && always()
-        run: |
-          echo "Checking generated files..."
-          ls -lah ${{ github.workspace }}/pr_analysis* || echo "❌ No analysis files found"
-          
-          if [ -f "${{ github.workspace }}/pr_analysis_report.md" ]; then
-            echo "Report file size:"
-            wc -l ${{ github.workspace }}/pr_analysis_report.md
-          fi
-      
-      - name: Post analysis report as PR comment
-        if: steps.changed-files.outputs.any_changed == 'true' && always()
+      # CHANGE 4: Robust error handling for comments
+      - name: Post Analysis Comment
         uses: actions/github-script@v7
+        if: always() && (inputs.pr-number || inputs.issue-number)
+        continue-on-error: true
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = require('path');
             
+            // Default message
+            let reportBody = '⚠️ Analysis completed. Check workflow logs for details.';
+            
+            // Try to read report file
             try {
-              const reportPath = path.join(process.env.GITHUB_WORKSPACE, 'pr_analysis_report.md');
-              console.log('Looking for report at:', reportPath);
-              
-              if (!fs.existsSync(reportPath)) {
-                console.log('Report file not found. Creating fallback message...');
+              if (fs.existsSync('neurashield-report.json')) {
+                const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
                 
-                const resultsPath = path.join(process.env.GITHUB_WORKSPACE, 'pr_analysis_results.json');
-                let message = '⚠️ NeuraShield AI analysis completed, but report generation had issues.\n\n';
-                
-                if (fs.existsSync(resultsPath)) {
-                  try {
-                    const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-                    message += `Analyzed ${results.length} file(s).\n\n`;
-                    message += 'Check the workflow logs for detailed results.';
-                  } catch (e) {
-                    message += 'Check the workflow logs for detailed results.';
-                  }
+                if (report.summary) {
+                  reportBody = report.summary;
+                } else if (report.findings) {
+                  reportBody = `Found ${report.findings.length} potential issues.`;
                 }
                 
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: message
-                });
-                
-                console.log('✅ Posted fallback comment');
-                return;
-              }
-              
-              const report = fs.readFileSync(reportPath, 'utf8');
-              
-              if (!report || report.trim().length === 0) {
-                console.log('Report file is empty');
-                
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: '⚠️ NeuraShield AI analysis completed but generated an empty report. Check workflow logs.'
-                });
+                console.log('✅ Report file loaded successfully');
               } else {
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: report
-                });
-                
-                console.log('✅ Successfully posted analysis report');
+                console.log('⚠️ Report file not found');
               }
             } catch (error) {
-              console.error('Error posting comment:', error.message);
-              
-              // Attempt to post error notification
-              try {
-                await github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: `❌ NeuraShield AI encountered an error: ${error.message}\n\nCheck the workflow logs for more details.`
-                });
-              } catch (e) {
-                console.error('Failed to post error notification:', e.message);
-              }
+              console.error('❌ Error reading report:', error.message);
             }
-      
-      - name: Check for critical issues
-        if: steps.changed-files.outputs.any_changed == 'true' && inputs.fail_on_critical
-        continue-on-error: true
-        run: |
-          if [ -f "${{ github.workspace }}/pr_analysis_results.json" ]; then
-            cd neurashield-engine
-            python .github/scripts/check_critical.py ${{ github.workspace }}/pr_analysis_results.json || true
-          else
-            echo "⚠️ No results file, skipping critical check"
-          fi
-      
-      - name: Upload analysis artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: neurashield-analysis-results
-          path: |
-            pr_analysis_results.json
-            pr_analysis_report.md
-          retention-days: 30
-        continue-on-error: true
+            
+            // Determine issue/PR number
+            const issue_number = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
+            
+            if (!issue_number) {
+              console.log('ℹ️ No issue/PR number provided, skipping comment');
+              return;
+            }
+            
+            // Post comment with error handling
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue_number,
+                body: `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`
+              });
+              console.log('✅ Comment posted successfully');
+            } catch (error) {
+              console.error('❌ Failed to post comment:', error.message);
+              // Don't fail the workflow if comment posting fails
+            }
