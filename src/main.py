@@ -1,61 +1,26 @@
 import argparse
 import json
-import sys
 import os
+import sys
+from pathlib import Path
+import openai
 
-def main():
-    parser = argparse.ArgumentParser(description='NeuraShield AI Code Analysis')
-    parser.add_argument('--source-path', required=True, help='Path to source code to analyze')
-    parser.add_argument('--output', required=True, help='Path to output report JSON file')
-    args = parser.parse_args()
-    
-    # Analyze the source code
-    source_path = args.source_path
-    
-    # Count Python files and lines
-    py_files = 0
-    total_lines = 0
-    findings = []
-    
-    for root, dirs, files in os.walk(source_path):
-        for file in files:
-            if file.endswith('.py'):
-                py_files += 1
-                filepath = os.path.join(root, file)
-                try:
-                    with open(filepath, 'r') as f:
-                        lines = len(f.readlines())
-                        total_lines += lines
-                        
-                        # Check for common issues
-                        with open(filepath, 'r') as f2:
-                            content = f2.read()
-                            if 'exec(' in content:
-                                findings.append(f"⚠️ Found dangerous 'exec()' in {file}")
-                            if 'eval(' in content:
-                                findings.append(f"⚠️ Found dangerous 'eval()' in {file}")
-                            if 'pickle' in content and 'loads(' in content:
-                                findings.append(f"⚠️ Found unsafe pickle deserialization in {file}")
-                except:
-                    pass
-    
-    # Generate report
-    report = {
-        "summary": f"✅ Analyzed {py_files} Python files with {total_lines} lines of code. Found {len(findings)} potential security issues.",
-        "statistics": {
-            "python_files": py_files,
-            "total_lines": total_lines,
-            "files_analyzed": py_files
-        },
-        "findings": findings if findings else ["✅ No major security issues detected"]
-    }
-    
-    # Save report
-    with open(args.output, 'w') as f:
-        json.dump(report, f, indent=2)
-    
-    print(f"✅ Analysis complete. Report saved to {args.output}")
-    print(f"📊 Files: {py_files} | Lines: {total_lines} | Issues: {len(findings)}")
+# Initialize OpenAI
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
-if __name__ == "__main__":
-    main()
+def read_file_safely(filepath, max_lines=100):
+    """Read file safely with line limit"""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+            return ''.join(lines[:max_lines])
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+def analyze_code_with_ai(code_content, filename):
+    """Use OpenAI to analyze code for security issues"""
+    try:
+        prompt = f"""Analyze this Python code for security vulnerabilities, best practices, and potential issues:
+
+File: {filename}
+Code:
