@@ -4,7 +4,13 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
-import openai
+
+try:
+    import openai
+except ImportError:
+    print("⚠️ OpenAI not installed. Installing...")
+    os.system("pip install openai")
+    import openai
 
 # Initialize OpenAI
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -27,62 +33,56 @@ File: {filename}
 Code:
 {code_content}
 
-Provide analysis in JSON format with EXACTLY these fields:
-{{
-  "severity": "critical|high|medium|low|none",
-  "score": <0-100>,
-  "issues": [
-    {{
-      "title": "Issue title",
-      "description": "Detailed description",
-      "severity": "critical|high|medium|low",
-      "line": <approx line number>,
-      "fix": "How to fix it"
-    }}
-  ],
-  "strengths": ["Good practices found"],
-  "recommendations": ["Actionable recommendations"]
-}}"""
+Provide analysis in JSON format with these fields:
+- severity: critical, high, medium, low, or none
+- score: 0-100 security score
+- issues: list of {{title, description, severity, fix}}
+- strengths: list of good practices
+- recommendations: list of recommendations
+
+Return ONLY valid JSON, no markdown."""
 
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a Python security expert. Respond with ONLY valid JSON."},
+                {"role": "system", "content": "You are a Python security expert. Respond with ONLY valid JSON, no markdown wrappers."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
             max_tokens=2000
         )
         
-        analysis_text = response.choices[0].message.content
+        analysis_text = response.choices[0].message.content.strip()
         
-        try:
-            # Clean up markdown code blocks if present
-            if '```
-                analysis_text = analysis_text.split('```json').split('```
-            elif '```' in analysis_text:
-                analysis_text = analysis_text.split('``````')[0]
-            
-            analysis = json.loads(analysis_text)
-        except:
-            analysis = {
-                "severity": "medium",
-                "score": 50,
-                "issues": [{"title": "Manual Review Required", "description": analysis_text, "severity": "medium"}],
-                "strengths": [],
-                "recommendations": ["Review code manually"]
-            }
+        # Clean up any markdown wrappers
+        if analysis_text.startswith('```
+            # Remove markdown code blocks
+            lines = analysis_text.split('\n')
+            analysis_text = '\n'.join(```')])
         
-        return analysis
+        analysis = json.loads(analysis_text)
+        
+    except json.JSONDecodeError as e:
+        print(f"JSON Parse Error: {str(e)}")
+        analysis = {
+            "severity": "medium",
+            "score": 50,
+            "issues": [{"title": "Manual Review Required", "description": "Could not parse AI response", "severity": "medium", "fix": "Review manually"}],
+            "strengths": [],
+            "recommendations": ["Review code manually"]
+        }
     
     except Exception as e:
-        return {
+        print(f"Analysis Error: {str(e)}")
+        analysis = {
             "severity": "unknown",
             "score": 0,
-            "issues": [{"title": "Analysis Error", "description": str(e), "severity": "medium"}],
+            "issues": [{"title": "Analysis Error", "description": str(e), "severity": "medium", "fix": "Check API key"}],
             "strengths": [],
-            "recommendations": ["Check API key and rate limits"]
+            "recommendations": ["Check OpenAI API key and rate limits"]
         }
+    
+    return analysis
 
 def scan_directory(source_path):
     """Scan directory and collect Python files"""
@@ -121,8 +121,10 @@ def generate_html_report(report_data):
     stats = report_data.get('statistics', {})
     recommendations = report_data.get('recommendations', [])
     
-    html = f"""
-<!DOCTYPE html>
+    score = stats.get('security_score', 0)
+    score_class = 'danger' if score < 40 else 'warning' if score < 70 else ''
+    
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -151,16 +153,17 @@ def generate_html_report(report_data):
         .issue.medium {{ border-left-color: #ffa502; }}
         .issue.low {{ border-left-color: #28a745; }}
         .issue .title {{ font-weight: bold; color: #333; }}
-        .issue .severity {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-top: 5px; }}
+        .issue .severity {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-top: 5px; font-weight: bold; }}
         .severity.critical {{ background: #f5576c; color: white; }}
         .severity.high {{ background: #ffa502; color: white; }}
         .severity.medium {{ background: #4facfe; color: white; }}
-        .severity.low {{ background: #43e97b; color: white; }}
+        .severity.low {{ background: #43e97b; color: #333; }}
         .recommendation {{ background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 10px; margin: 8px 0; border-radius: 4px; }}
         .score-badge {{ display: inline-block; background: #4CAF50; color: white; padding: 10px 20px; border-radius: 20px; font-weight: bold; font-size: 18px; }}
         .score-badge.danger {{ background: #f5576c; }}
         .score-badge.warning {{ background: #ffa502; }}
         .footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; text-align: center; }}
+        ul {{ margin-left: 20px; color: #666; line-height: 1.8; }}
     </style>
 </head>
 <body>
@@ -184,14 +187,14 @@ def generate_html_report(report_data):
                 <p>High Issues</p>
             </div>
             <div class="metric low">
-                <h3><span class="score-badge {'danger' if stats.get('security_score', 0) < 40 else 'warning' if stats.get('security_score', 0) < 70 else ''}"">{stats.get('security_score', 0)}</span></h3>
+                <h3><span class="score-badge {score_class}">{score}</span></h3>
                 <p>Security Score</p>
             </div>
         </div>
         
         <div class="section">
             <h2>📊 Analysis Summary</h2>
-            <ul style="margin-left: 20px; color: #666;">
+            <ul>
                 <li>Total Python Files: <strong>{stats.get('total_python_files', 0)}</strong></li>
                 <li>Files Analyzed: <strong>{stats.get('files_analyzed', 0)}</strong></li>
                 <li>Total Lines of Code: <strong>{stats.get('total_lines', 0)}</strong></li>
@@ -207,7 +210,7 @@ def generate_html_report(report_data):
             <h2>📁 File Analysis Details</h2>
 """
     
-    for file_info in files_analysis[:10]:  # Limit to first 10
+    for file_info in files_analysis[:10]:
         filename = file_info.get('file', 'Unknown')
         analysis = file_info.get('analysis', {})
         issues = analysis.get('issues', [])
@@ -225,16 +228,22 @@ def generate_html_report(report_data):
         if issues:
             for issue in issues[:5]:
                 severity = issue.get('severity', 'medium').lower()
+                title = issue.get('title', 'Issue')
+                desc = issue.get('description', '')
+                fix = issue.get('fix', '')
+                
                 html += f"""
                 <div class="issue {severity}">
-                    <div class="title">{issue.get('title', 'Issue')}</div>
-                    <div style="color: #666; margin: 5px 0; font-size: 13px;">{issue.get('description', '')}</div>
-                    {f'<div style="color: #666; margin: 5px 0; font-size: 13px;"><strong>Fix:</strong> {issue.get("fix", "")}</div>' if issue.get('fix') else ''}
+                    <div class="title">⚠️ {title}</div>
+                    <div style="color: #666; margin: 5px 0; font-size: 13px;">{desc}</div>
+                    <div style="color: #666; margin: 5px 0; font-size: 13px; background: #f0f0f0; padding: 8px; border-radius: 3px;">
+                        <strong>✓ Fix:</strong> {fix}
+                    </div>
                     <span class="severity {severity}">{severity.upper()}</span>
                 </div>
 """
         else:
-            html += '<div style="color: #28a745; padding: 10px; margin: 10px 0;">✅ No issues detected</div>'
+            html += '<div style="color: #28a745; padding: 10px; margin: 10px 0; background: #f0f8f5; border-radius: 3px;">✅ No issues detected</div>'
         
         html += '</div>'
     
@@ -252,7 +261,7 @@ def generate_html_report(report_data):
         </div>
         
         <div class="footer">
-            <p>NeuraShield AI Security Analysis • Powered by OpenAI • {datetime.now().strftime('%Y-%m-%d')}</p>
+            <p>NeuraShield AI Security Analysis • Powered by OpenAI GPT-3.5 • {datetime.now().strftime('%Y-%m-%d')}</p>
             <p><a href="https://github.com/AaryaSoni-web/neurashield-ai" style="color: #4CAF50; text-decoration: none;">View on GitHub →</a></p>
         </div>
     </div>
@@ -277,6 +286,16 @@ def main():
     
     if not python_files:
         print("❌ No Python files found")
+        report = {
+            "summary": "No Python files found",
+            "phase": "1",
+            "statistics": {"total_python_files": 0, "files_analyzed": 0, "total_lines": 0, "security_score": 0},
+            "files_analysis": [],
+            "all_findings": [],
+            "recommendations": []
+        }
+        with open(output_path, 'w') as f:
+            json.dump(report, f, indent=2)
         return
     
     print(f"✅ Found {len(python_files)} Python files with {total_lines} lines")
@@ -299,7 +318,7 @@ def main():
         analysis = analyze_code_with_ai(code_content, file_info['path'])
         
         # Track counts
-        severity = analysis.get('severity', 'unknown')
+        severity = analysis.get('severity', 'unknown').lower()
         if severity == 'critical':
             critical_count += 1
         elif severity == 'high':
