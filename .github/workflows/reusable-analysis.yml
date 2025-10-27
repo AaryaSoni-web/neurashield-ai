@@ -83,18 +83,32 @@ jobs:
           script: |
             const fs = require('fs');
             
-            // Default message
             let reportBody = '⚠️ Analysis completed. Check workflow logs for details.';
+            let commentDetails = '';
             
-            // Try to read report file
             try {
               if (fs.existsSync('neurashield-report.json')) {
                 const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
                 
-                if (report.summary) {
-                  reportBody = report.summary;
-                } else if (report.findings) {
-                  reportBody = `Found ${report.findings.length} potential issues.`;
+                reportBody = report.summary || 'Analysis completed';
+                
+                // Add statistics if available
+                if (report.statistics) {
+                  const stats = report.statistics;
+                  commentDetails = `
+      ### 📊 Analysis Summary
+      - **Files Analyzed:** ${stats.files_analyzed || 0}
+      - **Total Lines:** ${stats.total_lines || 0}
+      - **Security Score:** ${stats.security_score || 0}/100
+      
+      ### ⚠️ Issues Found
+      - Critical: ${stats.issues?.critical || 0}
+      - High: ${stats.issues?.high || 0}
+      - Medium: ${stats.issues?.medium || 0}
+      
+      ### 📋 Recommendations
+      ${(report.recommendations || []).map(r => `- ${r}`).join('\n')}
+      `;
                 }
                 
                 console.log('✅ Report file loaded successfully');
@@ -105,7 +119,6 @@ jobs:
               console.error('❌ Error reading report:', error.message);
             }
             
-            // Determine issue/PR number
             const issue_number = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
             
             if (!issue_number) {
@@ -113,16 +126,14 @@ jobs:
               return;
             }
             
-            // Post comment with error handling
             try {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issue_number,
-                body: `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`
+                body: `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}${commentDetails}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`
               });
               console.log('✅ Comment posted successfully');
             } catch (error) {
               console.error('❌ Failed to post comment:', error.message);
-              // Don't fail the workflow if comment posting fails
             }
