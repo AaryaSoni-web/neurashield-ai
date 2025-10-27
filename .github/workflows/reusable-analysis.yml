@@ -25,7 +25,6 @@ jobs:
     name: Analyze Code
     runs-on: ubuntu-latest
     
-    # CRITICAL: Permissions block to fix 403 errors
     permissions:
       contents: read
       issues: write
@@ -65,7 +64,6 @@ jobs:
             --source-path ../source-code \
             --output ../neurashield-report.json
       
-      # CHANGE 3: Artifact handling with error resilience
       - name: Save Analysis Report
         uses: actions/upload-artifact@v4
         if: always()
@@ -74,7 +72,6 @@ jobs:
           path: neurashield-report.json
           retention-days: 30
       
-      # CHANGE 4: Robust error handling for comments
       - name: Post Analysis Comment
         uses: actions/github-script@v7
         if: always() && (inputs.pr-number || inputs.issue-number)
@@ -82,58 +79,63 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            
             let reportBody = '⚠️ Analysis completed. Check workflow logs for details.';
             let commentDetails = '';
             
             try {
               if (fs.existsSync('neurashield-report.json')) {
                 const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
-                
                 reportBody = report.summary || 'Analysis completed';
                 
-                // Add statistics if available
                 if (report.statistics) {
                   const stats = report.statistics;
-                  commentDetails = `
-      ### 📊 Analysis Summary
-      - **Files Analyzed:** ${stats.files_analyzed || 0}
-      - **Total Lines:** ${stats.total_lines || 0}
-      - **Security Score:** ${stats.security_score || 0}/100
-      
-      ### ⚠️ Issues Found
-      - Critical: ${stats.issues?.critical || 0}
-      - High: ${stats.issues?.high || 0}
-      - Medium: ${stats.issues?.medium || 0}
-      
-      ### 📋 Recommendations
-      ${(report.recommendations || []).map(r => `- ${r}`).join('\n')}
-      `;
+                  const criticalCount = stats.issues?.critical || 0;
+                  const highCount = stats.issues?.high || 0;
+                  const mediumCount = stats.issues?.medium || 0;
+                  const filesAnalyzed = stats.files_analyzed || 0;
+                  const totalLines = stats.total_lines || 0;
+                  const securityScore = stats.security_score || 0;
+                  
+                  commentDetails = '\n\n### 📊 Analysis Summary\n';
+                  commentDetails += `- **Files Analyzed:** ${filesAnalyzed}\n`;
+                  commentDetails += `- **Total Lines:** ${totalLines}\n`;
+                  commentDetails += `- **Security Score:** ${securityScore}/100\n`;
+                  commentDetails += '\n### ⚠️ Issues Found\n';
+                  commentDetails += `- 🔴 Critical: ${criticalCount}\n`;
+                  commentDetails += `- 🟠 High: ${highCount}\n`;
+                  commentDetails += `- 🟡 Medium: ${mediumCount}\n`;
+                  
+                  if (report.recommendations && report.recommendations.length > 0) {
+                    commentDetails += '\n### 📋 Recommendations\n';
+                    report.recommendations.forEach(rec => {
+                      commentDetails += `- ${rec}\n`;
+                    });
+                  }
                 }
-                
-                console.log('✅ Report file loaded successfully');
+                console.log('✅ Report file loaded');
               } else {
                 console.log('⚠️ Report file not found');
               }
             } catch (error) {
-              console.error('❌ Error reading report:', error.message);
+              console.error('Error reading report:', error.message);
             }
             
-            const issue_number = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
+            const issueNumber = ${{ inputs.pr-number || inputs.issue-number || 'null' }};
             
-            if (!issue_number) {
-              console.log('ℹ️ No issue/PR number provided, skipping comment');
+            if (!issueNumber) {
+              console.log('No issue/PR number, skipping comment');
               return;
             }
             
             try {
+              const finalBody = `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}${commentDetails}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`;
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issue_number,
-                body: `## 🛡️ NeuraShield AI Analysis\n\n${reportBody}${commentDetails}\n\n---\n*Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*`
+                issue_number: issueNumber,
+                body: finalBody
               });
-              console.log('✅ Comment posted successfully');
+              console.log('✅ Comment posted');
             } catch (error) {
-              console.error('❌ Failed to post comment:', error.message);
+              console.error('Failed to post comment:', error.message);
             }
