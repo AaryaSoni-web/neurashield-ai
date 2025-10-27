@@ -6,12 +6,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# Add parent directory to path (neurashield-ai root)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
 from phase_1.vector_store import ChromaVectorStore
 from phase_1.embedding_generator import EmbeddingGenerator
 from phase_2.rag_analyzer import RAGAnalyzer
+
 
 
 def analyze_repository(source_path):
