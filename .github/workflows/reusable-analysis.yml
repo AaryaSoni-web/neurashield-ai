@@ -1,213 +1,295 @@
-name: Reusable NeuraShield Analysis
+name: NeuraShield AI - Reusable Security Analysis
 
 on:
   workflow_call:
     inputs:
-      source-repo:
-        description: 'Source repository (owner/repo)'
-        required: true
+      python-version:
+        description: 'Python version to use'
+        required: false
         type: string
-      pr-number:
-        description: 'Pull request number'
-        required: false
-        type: number
-      issue-number:
-        description: 'Issue number'
-        required: false
-        type: number
+        default: '3.x'
     secrets:
-      OPENAI_API_KEY:
-        description: 'OpenAI API Key for analysis'
+      GITHUB_TOKEN:
         required: true
 
 jobs:
-  analyze:
-    name: Analyze Code
+  security-analysis:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
     steps:
-      - name: Checkout NeuraShield AI
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          repository: AaryaSoni-web/neurashield-ai
-          path: neurashield-ai
-      
-      - name: Checkout Source Repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.source-repo }}
-          path: source-code
-      
-      - name: Setup Python
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: Install Dependencies
-        working-directory: neurashield-ai
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install NeuraShield Dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-      
+          python -m pip install --upgrade pip
+          pip install openai anthropic google-generativeai requests pyyaml
+
       - name: Run NeuraShield Analysis
-        working-directory: neurashield-ai
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        id: analysis
         run: |
-          python src/main.py \
-            --source-path ../source-code \
-            --output ../neurashield-report.json
-      
-      - name: Save Analysis Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: neurashield-report
-          path: |
-            neurashield-report.json
-            neurashield-report.txt
-          retention-days: 30
-      
-      - name: Post Analysis Comment
+          python -m neurashield.analyzer
+        continue-on-error: true
+
+      - name: Generate PR Comment
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
-        if: always() && inputs.pr-number
-        continue-on-error: false
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             
+            // Read analysis results
+            let analysisData;
             try {
-              if (!fs.existsSync('neurashield-report.json')) {
-                console.error('❌ Report file not found');
-                return;
+              const rawData = fs.readFileSync('neurashield_results.json', 'utf8');
+              analysisData = JSON.parse(rawData);
+            } catch (error) {
+              console.error('Error reading analysis results:', error);
+              return;
+            }
+
+            // Helper function to map CVSS to severity
+            function getCvsSeverity(cvssScore) {
+              if (cvssScore >= 9.0) return 'CRITICAL';
+              if (cvssScore >= 7.0) return 'HIGH';
+              if (cvssScore >= 4.0) return 'MEDIUM';
+              if (cvssScore >= 0.1) return 'LOW';
+              return 'NONE';
+            }
+
+            // Deduplicate issues by file + CWE
+            const uniqueIssues = {};
+            const allIssues = [
+              ...(analysisData.bugs || []),
+              ...(analysisData.vulnerabilities || [])
+            ];
+
+            for (const issue of allIssues) {
+              const key = `${issue.file}_${issue.cwe || 'UNKNOWN'}`;
+              if (!uniqueIssues[key]) {
+                // Determine severity from CVSS if available
+                const severity = issue.cvss_score 
+                  ? getCvsSeverity(issue.cvss_score)
+                  : (issue.severity || 'MEDIUM').toUpperCase();
+                
+                uniqueIssues[key] = {
+                  ...issue,
+                  severity: severity
+                };
               }
-              
-              const report = JSON.parse(fs.readFileSync('neurashield-report.json', 'utf8'));
-              const stats = report.statistics || {};
-              const findings = report.all_findings || [];
-              const recommendations = report.recommendations || [];
-              
-              console.log('✅ Report loaded successfully');
-              
-              // Build the formatted comment
-              let commentBody = '## 🛡️ NeuraShield AI - Security Analysis Report\n\n';
-              
-              // Summary Section
-              commentBody += '### 📊 Analysis Summary\n\n';
-              commentBody += `- **Files Analyzed:** ${stats.files_analyzed || 0}/${stats.total_python_files || 0}\n`;
-              commentBody += `- **Total Lines:** ${stats.total_lines || 0}\n`;
-              commentBody += `- **Security Score:** ${stats.security_score || 0}/100\n`;
-              commentBody += `- **Timestamp:** ${new Date(report.timestamp).toLocaleString()}\n\n`;
-              
-              // Issues Overview
-              const criticalCount = stats.issues?.critical || 0;
-              const highCount = stats.issues?.high || 0;
-              const mediumCount = stats.issues?.medium || 0;
-              const totalIssues = stats.issues?.total || 0;
-              
-              const overallRisk = criticalCount > 0 ? '🔴 CRITICAL' : highCount > 0 ? '🟠 HIGH' : mediumCount > 0 ? '🟡 MEDIUM' : '🟢 LOW';
-              
-              commentBody += '### ⚠️ Issues Found\n\n';
-              commentBody += `**Overall Risk:** ${overallRisk}\n\n`;
-              commentBody += `| Severity | Count |\n`;
-              commentBody += `|----------|-------|\n`;
-              commentBody += `| 🔴 Critical | ${criticalCount} |\n`;
-              commentBody += `| 🟠 High | ${highCount} |\n`;
-              commentBody += `| 🟡 Medium | ${mediumCount} |\n`;
-              commentBody += `| **Total** | **${totalIssues}** |\n\n`;
-              
-              // Critical Issues Detail
-              const criticalFindings = findings.filter(f => f.severity === 'critical');
-              if (criticalFindings.length > 0) {
-                commentBody += '### 🔴 Critical Issues\n\n';
-                criticalFindings.slice(0, 5).forEach((finding, idx) => {
-                  commentBody += `#### ${idx + 1}. ${finding.title}\n\n`;
-                  commentBody += `- **File:** \`${finding.file}\`\n`;
-                  commentBody += `- **Type:** ${finding.type}\n`;
-                  if (finding.cwe) commentBody += `- **CWE:** ${finding.cwe}\n`;
-                  if (finding.cvss_score) commentBody += `- **CVSS Score:** ${finding.cvss_score}/10\n`;
-                  commentBody += `- **Description:** ${finding.description}\n`;
-                  if (finding.fix) commentBody += `- **Fix:** ${finding.fix}\n`;
-                  commentBody += '\n';
+            }
+
+            const issues = Object.values(uniqueIssues);
+
+            // Count by severity
+            const severityCounts = {
+              CRITICAL: 0,
+              HIGH: 0,
+              MEDIUM: 0,
+              LOW: 0
+            };
+
+            issues.forEach(issue => {
+              const severity = issue.severity || 'MEDIUM';
+              if (severityCounts.hasOwnProperty(severity)) {
+                severityCounts[severity]++;
+              }
+            });
+
+            // Determine overall risk
+            let overallRisk = 'LOW';
+            if (severityCounts.CRITICAL > 0) {
+              overallRisk = 'CRITICAL';
+            } else if (severityCounts.HIGH > 0) {
+              overallRisk = 'HIGH';
+            } else if (severityCounts.MEDIUM > 0) {
+              overallRisk = 'MEDIUM';
+            }
+
+            // Format security score correctly (0-10 scale)
+            const securityScore = analysisData.security_score || 0;
+            const scoreDisplay = securityScore.toFixed(1);
+
+            // Determine risk emoji
+            const riskEmoji = {
+              'CRITICAL': '🔴',
+              'HIGH': '🟠',
+              'MEDIUM': '🟡',
+              'LOW': '🟢'
+            }[overallRisk] || '⚪';
+
+            // Build the comment
+            let comment = `## 🛡️ NeuraShield AI - Security Analysis Report\n\n`;
+            
+            // Summary Section
+            comment += `### 📊 Analysis Summary\n\n`;
+            comment += `- **Files Analyzed:** ${analysisData.files_analyzed || 0}/${analysisData.total_files || 0}\n`;
+            comment += `- **Total Lines:** ${analysisData.total_lines || 0}\n`;
+            comment += `- **Security Score:** ${scoreDisplay}/10\n`;
+            comment += `- **Timestamp:** ${analysisData.timestamp || new Date().toISOString()}\n\n`;
+
+            // Issues Summary
+            comment += `### ⚠️ Issues Found\n\n`;
+            comment += `**Overall Risk:** ${riskEmoji} **${overallRisk}**\n\n`;
+            
+            comment += `| Severity | Count |\n`;
+            comment += `|----------|-------|\n`;
+            comment += `| 🔴 Critical | ${severityCounts.CRITICAL} |\n`;
+            comment += `| 🟠 High | ${severityCounts.HIGH} |\n`;
+            comment += `| 🟡 Medium | ${severityCounts.MEDIUM} |\n`;
+            comment += `| 🔵 Low | ${severityCounts.LOW} |\n`;
+            comment += `| **Total** | **${issues.length}** |\n\n`;
+
+            // Detailed Issues
+            if (issues.length > 0) {
+              // Group by severity
+              const criticalIssues = issues.filter(i => i.severity === 'CRITICAL');
+              const highIssues = issues.filter(i => i.severity === 'HIGH');
+              const mediumIssues = issues.filter(i => i.severity === 'MEDIUM');
+              const lowIssues = issues.filter(i => i.severity === 'LOW');
+
+              if (criticalIssues.length > 0) {
+                comment += `### 🔴 Critical Issues\n\n`;
+                criticalIssues.forEach((issue, index) => {
+                  comment += `#### ${index + 1}. ${issue.type || 'Security Issue'}\n`;
+                  comment += `- **File:** \`${issue.file}\`\n`;
+                  if (issue.cvss_score) {
+                    comment += `- **CVSS Score:** ${issue.cvss_score}/10\n`;
+                  }
+                  if (issue.cwe) {
+                    comment += `- **CWE:** ${issue.cwe}\n`;
+                  }
+                  comment += `- **Description:** ${issue.description || 'No description available'}\n`;
+                  if (issue.fix) {
+                    comment += `- **Fix:** ${issue.fix}\n`;
+                  }
+                  comment += `\n`;
                 });
               }
-              
-              // High Issues Detail
-              const highFindings = findings.filter(f => f.severity === 'high');
-              if (highFindings.length > 0) {
-                commentBody += '### 🟠 High Severity Issues\n\n';
-                highFindings.slice(0, 5).forEach((finding, idx) => {
-                  commentBody += `#### ${idx + 1}. ${finding.title}\n\n`;
-                  commentBody += `- **File:** \`${finding.file}\`\n`;
-                  commentBody += `- **Type:** ${finding.type}\n`;
-                  if (finding.cwe) commentBody += `- **CWE:** ${finding.cwe}\n`;
-                  if (finding.cvss_score) commentBody += `- **CVSS Score:** ${finding.cvss_score}/10\n`;
-                  commentBody += `- **Description:** ${finding.description}\n`;
-                  if (finding.fix) commentBody += `- **Fix:** ${finding.fix}\n`;
-                  commentBody += '\n';
+
+              if (highIssues.length > 0) {
+                comment += `### 🟠 High Severity Issues\n\n`;
+                highIssues.forEach((issue, index) => {
+                  comment += `#### ${index + 1}. ${issue.type || 'Security Issue'}\n`;
+                  comment += `- **File:** \`${issue.file}\`\n`;
+                  if (issue.cvss_score) {
+                    comment += `- **CVSS Score:** ${issue.cvss_score}/10\n`;
+                  }
+                  if (issue.cwe) {
+                    comment += `- **CWE:** ${issue.cwe}\n`;
+                  }
+                  comment += `- **Description:** ${issue.description || 'No description available'}\n`;
+                  if (issue.fix) {
+                    comment += `- **Fix:** ${issue.fix}\n`;
+                  }
+                  comment += `\n`;
                 });
               }
-              
-              // Medium Issues Summary
-              const mediumFindings = findings.filter(f => f.severity === 'medium');
-              if (mediumFindings.length > 0) {
-                commentBody += '### 🟡 Medium Severity Issues\n\n';
-                commentBody += `Found ${mediumFindings.length} medium severity issue(s). `;
-                commentBody += `[View full report in artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.\n\n`;
-              }
-              
-              // Recommendations
-              if (recommendations.length > 0) {
-                commentBody += '### 📋 Recommendations\n\n';
-                recommendations.slice(0, 6).forEach(rec => {
-                  commentBody += `- ${rec}\n`;
+
+              if (mediumIssues.length > 0) {
+                comment += `### 🟡 Medium Severity Issues\n\n`;
+                mediumIssues.forEach((issue, index) => {
+                  comment += `#### ${index + 1}. ${issue.type || 'Security Issue'}\n`;
+                  comment += `- **File:** \`${issue.file}\`\n`;
+                  if (issue.cwe) {
+                    comment += `- **CWE:** ${issue.cwe}\n`;
+                  }
+                  comment += `- **Description:** ${issue.description || 'No description available'}\n`;
+                  if (issue.fix) {
+                    comment += `- **Fix:** ${issue.fix}\n`;
+                  }
+                  comment += `\n`;
                 });
-                commentBody += '\n';
               }
-              
-              // Immediate Actions
-              if (criticalCount > 0 || highCount > 0) {
-                commentBody += '### ⚡ Immediate Actions Required\n\n';
-                if (criticalCount > 0) commentBody += '- 🚨 **Fix all critical issues before merging**\n';
-                if (highCount > 0) commentBody += '- ⚠️ Address high severity findings\n';
-                commentBody += '- 📝 Conduct thorough code review\n';
-                commentBody += '- 🔄 Update dependencies\n\n';
+            }
+
+            // Recommendations
+            comment += `### 📋 Recommendations\n\n`;
+            comment += `- Review all critical and high severity issues immediately\n`;
+            comment += `- Implement automated code quality checks in CI/CD pipeline\n`;
+            comment += `- Use security linters: \`bandit\`, \`pylint\`, \`flake8\`\n`;
+            comment += `- Setup pre-commit hooks for code analysis\n`;
+            comment += `- Regular security audits and penetration testing\n`;
+            comment += `- Implement input validation and output encoding\n`;
+            if (analysisData.recommendations && Array.isArray(analysisData.recommendations)) {
+              analysisData.recommendations.forEach(rec => {
+                comment += `- ${rec}\n`;
+              });
+            }
+            comment += `\n`;
+
+            // Immediate Actions
+            if (severityCounts.CRITICAL > 0 || severityCounts.HIGH > 0) {
+              comment += `### ⚡ Immediate Actions Required\n\n`;
+              if (severityCounts.CRITICAL > 0) {
+                comment += `- ⚠️ Address ${severityCounts.CRITICAL} critical issue(s)\n`;
               }
-              
-              // Merge Recommendation
-              commentBody += '### 🎯 Merge Recommendation\n\n';
-              if (criticalCount > 0) {
-                commentBody += '❌ **DO NOT MERGE** - Critical security issues must be resolved first.\n\n';
-              } else if (highCount >= 3 || stats.security_score < 50) {
-                commentBody += '⚠️ **REVIEW CAREFULLY** - Multiple high severity issues or low security score.\n\n';
-              } else if (highCount > 0 || (stats.security_score >= 50 && stats.security_score < 70)) {
-                commentBody += '⚠️ **CAUTION** - Review high severity issues before merging.\n\n';
-              } else {
-                commentBody += '✅ **SAFE TO MERGE** - No critical or major security concerns detected.\n\n';
+              if (severityCounts.HIGH > 0) {
+                comment += `- ⚠️ Address ${severityCounts.HIGH} high severity issue(s)\n`;
               }
-              
-              // Footer
-              commentBody += '---\n\n';
-              commentBody += '📥 **[Download Full Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})** (JSON + TXT)\n\n';
-              commentBody += '🔗 *Powered by [NeuraShield AI](https://github.com/AaryaSoni-web/neurashield-ai)*';
-              
-              // Post the comment
-              const prNumber = ${{ inputs.pr-number }};
-              console.log(`Posting formatted comment to PR #${prNumber}`);
-              
-              const result = await github.rest.issues.createComment({
+              comment += `- 📝 Conduct thorough code review\n`;
+              comment += `- 🔄 Update dependencies\n\n`;
+            }
+
+            // Merge Recommendation
+            comment += `### 🎯 Merge Recommendation\n\n`;
+            if (severityCounts.CRITICAL > 0) {
+              comment += `🛑 **DO NOT MERGE** - Critical security issues must be resolved first.\n\n`;
+            } else if (severityCounts.HIGH > 0) {
+              comment += `⚠️ **REVIEW CAREFULLY** - High severity issues detected.\n\n`;
+            } else if (severityCounts.MEDIUM > 0) {
+              comment += `⚠️ **REVIEW RECOMMENDED** - Medium severity issues detected.\n\n`;
+            } else {
+              comment += `✅ **SAFE TO MERGE** - No critical issues detected.\n\n`;
+            }
+
+            // Footer
+            comment += `---\n`;
+            comment += `📥 **Download Full Reports** (JSON + TXT) from workflow artifacts\n\n`;
+            comment += `🔗 *Powered by NeuraShield AI*\n`;
+
+            // Post comment
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: prNumber,
-                body: commentBody
+                body: comment
               });
-              
-              console.log('✅ Comment posted successfully!');
-              console.log(`Comment URL: ${result.data.html_url}`);
-              
+              console.log('Successfully posted comment to PR');
             } catch (error) {
-              console.error('❌ Error:', error.message);
-              throw error;
+              console.error('Error posting comment:', error);
+              core.setFailed(`Failed to post comment: ${error.message}`);
             }
+
+      - name: Upload Analysis Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurashield-reports
+          path: |
+            neurashield_results.json
+            neurashield_report.txt
+          retention-days: 30
+
+      - name: Check Security Status
+        if: always()
+        run: |
+          # Fail the workflow if critical issues are found
+          if [ -f "neurashield_results.json" ]; then
+            CRITICAL_COUNT=$(python -c "import json; data=json.load(open('neurashield_results.json')); print(sum(1 for i in data.get('bugs', []) + data.get('vulnerabilities', []) if i.get('cvss_score', 0) >= 9.0))")
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ Found $CRITICAL_COUNT critical security issue(s)"
+              exit 1
+            fi
+          fi
