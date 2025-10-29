@@ -81,7 +81,7 @@ jobs:
             // Read analysis results
             let analysisData;
             try {
-              const rawData = fs.readFileSync('neurashield-results.json', 'utf8');
+              const rawData = fs.readFileSync('neurashield-report.json', 'utf8');
               analysisData = JSON.parse(rawData);
             } catch (error) {
               console.error('Error reading analysis results:', error);
