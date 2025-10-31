@@ -1,0 +1,551 @@
+[
+  {
+    "timestamp": "2025-10-26T04:37:10.372812",
+    "code": "# run.py\n\nfrom app import app\n\nif __name__ == '__main__':\n    app.run()\n\n",
+    "analysis_type": "all",
+    "retrieved_patterns_count": 5,
+    "retrieved_patterns": [
+      {
+        "id": "run_py_run_py",
+        "similarity_score": 0.7139488458633423,
+        "code": "from app import app\n\nif __name__ == '__main__':\n    app.run()",
+        "metadata": {
+          "complexity_score": 2,
+          "type": "module",
+          "line_start": 1,
+          "language": "python",
+          "file_loc": 4,
+          "name": "run.py",
+          "file_path": "run.py",
+          "token_count": 17,
+          "line_end": 4
+        }
+      },
+      {
+        "id": "app___init___py_app___init___py",
+        "similarity_score": 0.06375104188919067,
+        "code": "from flask import Flask\n\napp = Flask(__name__)\n\nfrom app import routes",
+        "metadata": {
+          "language": "python",
+          "type": "module",
+          "file_path": "app/__init__.py",
+          "complexity_score": 1,
+          "token_count": 15,
+          "name": "app/__init__.py",
+          "line_end": 5,
+          "line_start": 1,
+          "file_loc": 3
+        }
+      },
+      {
+        "id": "app_routes_py_hello",
+        "similarity_score": -0.1870964765548706,
+        "code": "def hello():\n    return \"Hello, Flask!\"",
+        "metadata": {
+          "line_start": 7,
+          "token_count": 10,
+          "type": "function",
+          "line_end": 8,
+          "name": "hello",
+          "file_path": "app/routes.py",
+          "file_loc": 21,
+          "is_async": "False",
+          "complexity_score": 2,
+          "language": "python"
+        }
+      },
+      {
+        "id": "app_routes_py_get_items",
+        "similarity_score": -0.6538136005401611,
+        "code": "def get_items():\n    return {'items': items}",
+        "metadata": {
+          "line_end": 12,
+          "name": "get_items",
+          "file_path": "app/routes.py",
+          "type": "function",
+          "language": "python",
+          "line_start": 11,
+          "complexity_score": 2,
+          "is_async": "False",
+          "token_count": 11,
+          "file_loc": 21
+        }
+      },
+      {
+        "id": "app_routes_py_add_item",
+        "similarity_score": -0.7204601764678955,
+        "code": "def add_item():\n    item = request.get_json()\n    items.append(item)\n    return {'message': 'Item added successfully'}, 201",
+        "metadata": {
+          "is_async": "False",
+          "file_loc": 21,
+          "language": "python",
+          "name": "add_item",
+          "line_start": 22,
+          "complexity_score": 2,
+          "file_path": "app/routes.py",
+          "type": "function",
+          "token_count": 28,
+          "line_end": 25
+        }
+      }
+    ],
+    "bug_analysis": {
+      "has_bugs": true,
+      "bugs_found": [
+        {
+          "type": "Insecure Default Configuration",
+          "line": "general",
+          "description": "The Flask application is being run without specifying the host or debug mode, which defaults to running on all interfaces and potentially with debug mode enabled. This can expose the application to remote attacks and information disclosure.",
+          "severity": "high",
+          "exploit_difficulty": "easy",
+          "impact": {
+            "confidentiality": "partial",
+            "integrity": "none",
+            "availability": "partial"
+          },
+          "cwe_id": "CWE-200",
+          "fix": "Modify the app.run() call to specify host='127.0.0.1' and ensure debug=False for production environments. Example: app.run(host='127.0.0.1', debug=False)",
+          "additional_recommendations": [
+            "Use environment variables to configure the host and debug settings.",
+            "Implement proper access controls and firewall rules to restrict access to the application."
+          ]
+        }
+      ],
+      "reasoning": "Step 1: Identify Vulnerability Types - The code snippet provided is a basic Flask application entry point. The primary concern here is the potential for insecure default configurations. By default, Flask runs on all interfaces (0.0.0.0) and may run in debug mode if not explicitly set otherwise. This can lead to information disclosure and increased attack surface.\n\nStep 2: Assess Exploitability - Exploiting this vulnerability is easy as it requires no special prerequisites other than network access to the server. It can be exploited remotely if the server is exposed to the internet.\n\nStep 3: Determine Impact (CIA Triad) - Confidentiality: Partial, as debug mode can leak sensitive information. Integrity: None, as this configuration does not directly allow data modification. Availability: Partial, as exposing the application can lead to potential DoS attacks.\n\nStep 4: Provide Specific Fix - The fix involves configuring the application to run on localhost and disabling debug mode in production. Additional recommendations include using environment variables for configuration and implementing network security measures.",
+      "overall_risk": "medium"
+    },
+    "optimization_analysis": {
+      "current_complexity": {
+        "time": "O(1)",
+        "space": "O(1)",
+        "bottlenecks": []
+      },
+      "optimizations": [],
+      "pythonic_improvements": [],
+      "reasoning": "The provided code snippet is a simple script to run a Flask application. It imports the 'app' object from the 'app' module and calls 'app.run()' if the script is executed as the main program. This is a standard pattern for running a Flask application and does not involve any loops or complex operations that would impact time or space complexity. The time and space complexity are both O(1) because the script performs a constant amount of work regardless of input size. There are no performance bottlenecks or redundant operations in this code. The script is already using Pythonic idioms, such as the '__name__ == \"__main__\"' construct to ensure the script is executed directly. There are no unnecessary copies or memory issues, as the script simply starts the Flask server. Since this is a minimal and standard setup for running a Flask application, there are no algorithmic improvements or Pythonic best practices that need to be applied. The code is already optimal for its purpose, and there are no expected performance gains from further optimization.",
+      "estimated_speedup": "N/A"
+    },
+    "security_analysis": {
+      "vulnerabilities": [
+        {
+          "type": "Insecure Default Configuration",
+          "description": "The application is running with default settings that may expose it to network-based attacks. Running a Flask application with `app.run()` in a production environment can expose the application to remote code execution or other network-based attacks.",
+          "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "cvss_score": 9.8,
+          "severity": "Critical",
+          "metrics": {
+            "attack_vector": "Network",
+            "attack_complexity": "Low",
+            "privileges_required": "None",
+            "user_interaction": "None",
+            "scope": "Unchanged",
+            "confidentiality_impact": "High",
+            "integrity_impact": "High",
+            "availability_impact": "High"
+          },
+          "cwe_id": "CWE-200",
+          "remediation": "Use a production-ready server like Gunicorn or uWSGI to run the Flask application. Ensure that the application is configured to run in a secure environment with appropriate firewall and network settings.",
+          "references": [
+            "https://cwe.mitre.org/data/definitions/200.html",
+            "https://owasp.org/www-project-top-ten/2017/A6_2017-Security_Misconfiguration"
+          ]
+        }
+      ],
+      "overall_security_score": 9.8,
+      "overall_severity": "Critical",
+      "risk_summary": "The application is currently configured to run in a potentially insecure manner, exposing it to high-severity network-based attacks. Immediate action is required to secure the application.",
+      "immediate_actions": [
+        "Switch to a production-ready server such as Gunicorn or uWSGI.",
+        "Review and update network and firewall configurations to limit exposure.",
+        "Ensure that the application is not running with default or insecure settings in a production environment."
+      ]
+    },
+    "sample_name": "run.py"
+  },
+  {
+    "timestamp": "2025-10-26T04:37:27.958040",
+    "code": "from flask import Flask\n\napp = Flask(__name__)\n\nfrom app import routes\n",
+    "analysis_type": "all",
+    "retrieved_patterns_count": 5,
+    "retrieved_patterns": [
+      {
+        "id": "app___init___py_app___init___py",
+        "similarity_score": 0.9693380426615477,
+        "code": "from flask import Flask\n\napp = Flask(__name__)\n\nfrom app import routes",
+        "metadata": {
+          "language": "python",
+          "line_end": 5,
+          "name": "app/__init__.py",
+          "complexity_score": 1,
+          "token_count": 15,
+          "file_path": "app/__init__.py",
+          "file_loc": 3,
+          "line_start": 1,
+          "type": "module"
+        }
+      },
+      {
+        "id": "run_py_run_py",
+        "similarity_score": 0.06709456443786621,
+        "code": "from app import app\n\nif __name__ == '__main__':\n    app.run()",
+        "metadata": {
+          "complexity_score": 2,
+          "file_path": "run.py",
+          "token_count": 17,
+          "name": "run.py",
+          "language": "python",
+          "file_loc": 4,
+          "line_end": 4,
+          "type": "module",
+          "line_start": 1
+        }
+      },
+      {
+        "id": "app_routes_py_hello",
+        "similarity_score": -0.011687994003295898,
+        "code": "def hello():\n    return \"Hello, Flask!\"",
+        "metadata": {
+          "type": "function",
+          "file_loc": 21,
+          "language": "python",
+          "file_path": "app/routes.py",
+          "token_count": 10,
+          "line_start": 7,
+          "name": "hello",
+          "is_async": "False",
+          "complexity_score": 2,
+          "line_end": 8
+        }
+      },
+      {
+        "id": "app_routes_py_get_items",
+        "similarity_score": -0.6531739234924316,
+        "code": "def get_items():\n    return {'items': items}",
+        "metadata": {
+          "complexity_score": 2,
+          "language": "python",
+          "file_path": "app/routes.py",
+          "line_end": 12,
+          "line_start": 11,
+          "token_count": 11,
+          "name": "get_items",
+          "is_async": "False",
+          "type": "function",
+          "file_loc": 21
+        }
+      },
+      {
+        "id": "app_routes_py_add_item",
+        "similarity_score": -0.6608626842498779,
+        "code": "def add_item():\n    item = request.get_json()\n    items.append(item)\n    return {'message': 'Item added successfully'}, 201",
+        "metadata": {
+          "language": "python",
+          "file_path": "app/routes.py",
+          "token_count": 28,
+          "complexity_score": 2,
+          "file_loc": 21,
+          "name": "add_item",
+          "line_start": 22,
+          "line_end": 25,
+          "is_async": "False",
+          "type": "function"
+        }
+      }
+    ],
+    "bug_analysis": {
+      "has_bugs": false,
+      "bugs_found": [],
+      "reasoning": "Step 1: Identify Vulnerability Types\n- The provided code snippet is a minimal Flask application setup with no routes or logic implemented. It simply imports the Flask class and initializes an application instance. There are no SQL operations, user inputs, or other typical sources of vulnerabilities such as XSS, buffer overflow, or authentication flaws.\n- The code does not perform any input/output operations or handle any data, so issues like SQL injection, XSS, or unsafe deserialization are not applicable.\n\nStep 2: Assess Exploitability\n- Since the code does not implement any functionality, there are no exploitable vulnerabilities present.\n- No prerequisites or conditions exist for exploitation because the code lacks any operational logic.\n\nStep 3: Determine Impact (CIA Triad)\n- Confidentiality: No sensitive data is handled, so there is no risk.\n- Integrity: The code does not modify or handle data, so there is no risk.\n- Availability: The code does not perform any operations that could affect service availability.\n\nStep 4: Provide Specific Fix\n- There are no bugs or vulnerabilities to fix in the provided code snippet.\n- No additional security measures are necessary for this basic setup.\n\nOverall, the code is a simple setup for a Flask application and does not contain any logic that could introduce vulnerabilities. Therefore, there are no bugs or security issues to address.",
+      "overall_risk": "low"
+    },
+    "optimization_analysis": {
+      "current_complexity": {
+        "time": "O(1)",
+        "space": "O(1)",
+        "bottlenecks": []
+      },
+      "optimizations": [],
+      "pythonic_improvements": [],
+      "reasoning": "The provided code snippet is a minimal Flask application setup. It imports the Flask class, creates an app instance, and imports routes from the app module. The time and space complexity are both O(1) because the operations involved are constant time and space operations. There are no loops or recursive calls that would increase complexity. The code is already following best practices for a Flask application setup, with the app instance being created at the top level and routes being imported subsequently. This pattern is standard for Flask applications to ensure that the app instance is available for route definitions. There are no algorithmic or memory optimization opportunities because the code does not perform any computational tasks or data manipulations. The focus here is on application structure rather than performance optimization. Therefore, no further Pythonic improvements or optimizations are necessary.",
+      "estimated_speedup": "N/A"
+    },
+    "security_analysis": {
+      "vulnerabilities": [
+        {
+          "type": "Improper Input Validation",
+          "description": "The 'add_item' function in 'app/routes.py' does not validate input data from 'request.get_json()', which could lead to potential injection attacks.",
+          "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+          "cvss_score": 6.3,
+          "severity": "Medium",
+          "metrics": {
+            "attack_vector": "Network",
+            "attack_complexity": "Low",
+            "privileges_required": "None",
+            "user_interaction": "Required",
+            "scope": "Unchanged",
+            "confidentiality_impact": "Low",
+            "integrity_impact": "Low",
+            "availability_impact": "None"
+          },
+          "cwe_id": "CWE-20",
+          "remediation": "Implement input validation and sanitization for data received from 'request.get_json()'.",
+          "references": [
+            "https://cwe.mitre.org/data/definitions/20.html",
+            "https://owasp.org/www-community/attacks/Input_Validation"
+          ]
+        }
+      ],
+      "overall_security_score": 6.3,
+      "overall_severity": "Medium",
+      "risk_summary": "The application has a medium-risk vulnerability due to improper input validation, which could allow attackers to inject malicious data.",
+      "immediate_actions": [
+        "Implement input validation and sanitization in the 'add_item' function.",
+        "Review other endpoints for similar input validation issues."
+      ]
+    },
+    "sample_name": "app/__init__.py"
+  },
+  {
+    "timestamp": "2025-10-26T04:37:39.939856",
+    "code": "# app/routes.py\n\nfrom app import app\nfrom flask import request\n\nitems = []\n\n@app.route('/')\ndef hello():\n    return \"Hello, Flask!\"\n\n@app.route('/items', methods=['GET'])\ndef get_items():\n    return {'items': items}\n\n@app.route('/items/<int:item_id>', methods=['GET'])\ndef get_item(item_id):\n    if item_id < len(items):\n        return {'item': items[item_id]}\n    else:\n        return {'error': 'Item not found'}, 404\n\n@app.route('/items', methods=['POST'])\ndef add_item():\n    item = request.get_json()\n    items.append(item)\n    return {'message': 'Item added successfully'}, 201\n",
+    "analysis_type": "all",
+    "retrieved_patterns_count": 5,
+    "retrieved_patterns": [
+      {
+        "id": "app___init___py_app___init___py",
+        "similarity_score": 0.21568012237548828,
+        "code": "from flask import Flask\n\napp = Flask(__name__)\n\nfrom app import routes",
+        "metadata": {
+          "line_start": 1,
+          "complexity_score": 1,
+          "file_loc": 3,
+          "name": "app/__init__.py",
+          "file_path": "app/__init__.py",
+          "line_end": 5,
+          "type": "module",
+          "language": "python",
+          "token_count": 15
+        }
+      },
+      {
+        "id": "app_routes_py_add_item",
+        "similarity_score": 0.20054703950881958,
+        "code": "def add_item():\n    item = request.get_json()\n    items.append(item)\n    return {'message': 'Item added successfully'}, 201",
+        "metadata": {
+          "line_start": 22,
+          "token_count": 28,
+          "line_end": 25,
+          "complexity_score": 2,
+          "is_async": "False",
+          "language": "python",
+          "name": "add_item",
+          "file_path": "app/routes.py",
+          "file_loc": 21,
+          "type": "function"
+        }
+      },
+      {
+        "id": "app_routes_py_get_item",
+        "similarity_score": -0.003912568092346191,
+        "code": "def get_item(item_id):\n    if item_id < len(items):\n        return {'item': items[item_id]}\n    else:\n        return {'error': 'Item not found'}, 404",
+        "metadata": {
+          "complexity_score": 2,
+          "file_loc": 21,
+          "file_path": "app/routes.py",
+          "token_count": 38,
+          "type": "function",
+          "language": "python",
+          "line_end": 19,
+          "line_start": 15,
+          "name": "get_item",
+          "is_async": "False"
+        }
+      },
+      {
+        "id": "app_routes_py_get_items",
+        "similarity_score": -0.034316182136535645,
+        "code": "def get_items():\n    return {'items': items}",
+        "metadata": {
+          "name": "get_items",
+          "line_start": 11,
+          "line_end": 12,
+          "is_async": "False",
+          "file_path": "app/routes.py",
+          "token_count": 11,
+          "language": "python",
+          "type": "function",
+          "complexity_score": 2,
+          "file_loc": 21
+        }
+      },
+      {
+        "id": "run_py_run_py",
+        "similarity_score": -0.0745549201965332,
+        "code": "from app import app\n\nif __name__ == '__main__':\n    app.run()",
+        "metadata": {
+          "line_start": 1,
+          "line_end": 4,
+          "complexity_score": 2,
+          "file_loc": 4,
+          "token_count": 17,
+          "language": "python",
+          "file_path": "run.py",
+          "type": "module",
+          "name": "run.py"
+        }
+      }
+    ],
+    "bug_analysis": {
+      "has_bugs": true,
+      "bugs_found": [
+        {
+          "type": "Insecure Direct Object Reference",
+          "line": "general",
+          "description": "The code allows direct access to items in a list using an index, which could lead to unauthorized access if the list contains sensitive data.",
+          "severity": "medium",
+          "exploit_difficulty": "easy",
+          "impact": {
+            "confidentiality": "partial",
+            "integrity": "none",
+            "availability": "none"
+          },
+          "cwe_id": "CWE-639",
+          "fix": "Implement access control checks to ensure that the user is authorized to access the specific item.",
+          "additional_recommendations": [
+            "Consider using UUIDs instead of integer indices for accessing items."
+          ]
+        },
+        {
+          "type": "Input Validation",
+          "line": "general",
+          "description": "The code does not validate the input data when adding new items, which could lead to unexpected behavior or security vulnerabilities.",
+          "severity": "medium",
+          "exploit_difficulty": "easy",
+          "impact": {
+            "confidentiality": "none",
+            "integrity": "partial",
+            "availability": "none"
+          },
+          "cwe_id": "CWE-20",
+          "fix": "Validate the input data to ensure it meets expected formats and types before processing.",
+          "additional_recommendations": [
+            "Use a schema validation library like Marshmallow to enforce input data structure."
+          ]
+        },
+        {
+          "type": "Denial of Service",
+          "line": "general",
+          "description": "The application stores items in a global list, which could grow indefinitely and lead to memory exhaustion.",
+          "severity": "medium",
+          "exploit_difficulty": "moderate",
+          "impact": {
+            "confidentiality": "none",
+            "integrity": "none",
+            "availability": "partial"
+          },
+          "cwe_id": "CWE-400",
+          "fix": "Implement limits on the number of items that can be stored or use a database with proper indexing and storage management.",
+          "additional_recommendations": [
+            "Consider implementing rate limiting to prevent abuse."
+          ]
+        }
+      ],
+      "reasoning": "Step 1: Identify Vulnerability Types - The code was analyzed for common vulnerabilities such as insecure direct object references, input validation issues, and potential denial of service due to unbounded resource allocation. Step 2: Assess Exploitability - The vulnerabilities identified are relatively easy to exploit, especially in a scenario where the application is exposed to the internet without proper access controls. Step 3: Determine Impact (CIA Triad) - The impact on confidentiality is partial due to potential unauthorized access to items. Integrity is partially affected due to lack of input validation, and availability is partially affected due to potential memory exhaustion. Step 4: Provide Specific Fix - Specific fixes include implementing access control checks, input validation, and resource limits.",
+      "overall_risk": "medium"
+    },
+    "optimization_analysis": {
+      "current_complexity": {
+        "time": "O(1) for each route operation",
+        "space": "O(n) where n is the number of items in the list",
+        "bottlenecks": [
+          "Global list 'items' can grow indefinitely, leading to potential memory issues",
+          "No concurrency control for the 'items' list, which could be problematic in a multi-threaded environment"
+        ]
+      },
+      "optimizations": [
+        {
+          "type": "memory",
+          "description": "Use a database or persistent storage instead of a global list",
+          "current_code_snippet": "items = []",
+          "optimized_code": "Use a database like SQLite or an in-memory database like Redis",
+          "improvement": "Improves scalability and persistence, allows for better memory management",
+          "trade_offs": "Increased complexity in setup and maintenance of a database"
+        },
+        {
+          "type": "algorithmic",
+          "description": "Add concurrency control for the 'items' list",
+          "current_code_snippet": "items.append(item)",
+          "optimized_code": "from threading import Lock\n\nitems_lock = Lock()\n\n@app.route('/items', methods=['POST'])\ndef add_item():\n    item = request.get_json()\n    with items_lock:\n        items.append(item)\n    return {'message': 'Item added successfully'}, 201",
+          "improvement": "Prevents race conditions in a multi-threaded environment",
+          "trade_offs": "Slight overhead due to locking mechanism"
+        }
+      ],
+      "pythonic_improvements": [
+        {
+          "suggestion": "Use Flask's jsonify for consistent JSON responses",
+          "code_example": "from flask import jsonify\n\n@app.route('/items', methods=['GET'])\ndef get_items():\n    return jsonify({'items': items})"
+        }
+      ],
+      "reasoning": "Step 1: The current complexity for each route operation is O(1) since each operation (get, add) is a direct list access or append. The space complexity is O(n) due to the list storing all items.\n\nStep 2: The global list 'items' is not suitable for large-scale applications due to potential memory issues and lack of persistence. Using a database would address these concerns. Additionally, without concurrency control, the list operations could lead to race conditions in a multi-threaded environment.\n\nStep 3: Using Flask's jsonify function ensures consistent and proper JSON responses, which is a more Pythonic and Flask-idiomatic approach.\n\nStep 4: The global list can lead to memory accumulation if not managed properly. Switching to a database would alleviate this issue.\n\nOverall, these optimizations improve the robustness and scalability of the application.",
+      "estimated_speedup": "Not directly applicable, but improves scalability and robustness"
+    },
+    "security_analysis": {
+      "vulnerabilities": [
+        {
+          "type": "Insecure Direct Object Reference (IDOR)",
+          "description": "The application allows direct access to objects based on user-supplied input without proper authorization checks. The 'get_item' function retrieves items based on user input without verifying if the user is authorized to access that item.",
+          "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "cvss_score": 7.5,
+          "severity": "High",
+          "metrics": {
+            "attack_vector": "Network",
+            "attack_complexity": "Low",
+            "privileges_required": "None",
+            "user_interaction": "None",
+            "scope": "Unchanged",
+            "confidentiality_impact": "Low",
+            "integrity_impact": "Low",
+            "availability_impact": "None"
+          },
+          "cwe_id": "CWE-639",
+          "remediation": "Implement proper authorization checks to ensure that users can only access items they are permitted to view.",
+          "references": [
+            "https://cwe.mitre.org/data/definitions/639.html",
+            "https://owasp.org/www-community/attacks/IDOR"
+          ]
+        },
+        {
+          "type": "Improper Input Validation",
+          "description": "The 'add_item' function accepts JSON input from users without validating the content, which could lead to injection attacks or data corruption.",
+          "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+          "cvss_score": 6.3,
+          "severity": "Medium",
+          "metrics": {
+            "attack_vector": "Network",
+            "attack_complexity": "Low",
+            "privileges_required": "None",
+            "user_interaction": "Required",
+            "scope": "Unchanged",
+            "confidentiality_impact": "Low",
+            "integrity_impact": "Low",
+            "availability_impact": "None"
+          },
+          "cwe_id": "CWE-20",
+          "remediation": "Validate and sanitize input data to ensure it conforms to expected formats and types before processing.",
+          "references": [
+            "https://cwe.mitre.org/data/definitions/20.html",
+            "https://owasp.org/www-community/attacks/Input_Validation"
+          ]
+        }
+      ],
+      "overall_security_score": 7.5,
+      "overall_severity": "High",
+      "risk_summary": "The application contains vulnerabilities that could allow unauthorized access to sensitive data and potential data manipulation. Immediate attention is required to address these issues to prevent exploitation.",
+      "immediate_actions": [
+        "Implement authorization checks in the 'get_item' function to ensure users can only access items they are permitted to view.",
+        "Add input validation and sanitization in the 'add_item' function to prevent injection attacks and ensure data integrity."
+      ]
+    },
+    "sample_name": "app/routes.py"
+  }
+]
